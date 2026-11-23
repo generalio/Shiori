@@ -396,8 +396,11 @@ struct SimulationPageReaderView: View {
 
                                     Image(systemName: "arrow.up.left.and.arrow.down.right")
                                         .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.primary)
                                         .padding(7)
-                                        .glassEffect(.regular, in: .circle)
+                                        .background(.regularMaterial, in: Circle())
+                                        .overlay(Circle().strokeBorder(StudioTokens.hairlineStroke, lineWidth: 1))
+                                        .shadow(color: StudioTokens.cardShadowColor, radius: 4, y: 2)
                                         .padding(10)
                                 }
                             }
@@ -450,10 +453,9 @@ struct SimulationPageReaderView: View {
                 .font(.callout)
                 .foregroundStyle(vm.readerTheme.foregroundColor.opacity(0.5))
             if vm.adjacentChapter(offset: 1) != nil {
-                Button("进入下一章") {
+                StudioPillButton(title: "进入下一章", systemImage: "arrow.right", variant: .primary) {
                     onNextChapter()
                 }
-                .buttonStyle(.glass)
             }
             Spacer()
         }
@@ -485,7 +487,9 @@ struct SimulationPageReaderView: View {
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(vm.readerTheme.foregroundColor.opacity(0.75))
                 .frame(width: 36, height: 54)
-                .glassEffect(.regular, in: Capsule())
+                .background(.regularMaterial, in: Capsule())
+                .overlay(Capsule().strokeBorder(StudioTokens.hairlineStroke, lineWidth: 1))
+                .shadow(color: StudioTokens.cardShadowColor, radius: 6, y: 2)
         }
         .buttonStyle(.plain)
         .opacity(isVisible && (canTurnPage || canTurnChapter) ? 0.92 : 0.0)

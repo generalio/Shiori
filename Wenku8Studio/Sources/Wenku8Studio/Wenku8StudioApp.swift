@@ -27,5 +27,24 @@ struct Wenku8StudioApp: App {
         }
         .windowStyle(.titleBar)
         .defaultSize(width: 1220, height: 780)
+        .commands {
+            CommandGroup(replacing: .appInfo) {
+                Button("关于 Wenku8 Studio") {
+                    viewModel.navigateToSettingsCategory(.about)
+                }
+            }
+            CommandGroup(after: .appInfo) {
+                Button("检查更新…") {
+                    viewModel.navigateToSettingsCategory(.about)
+                    Task { await viewModel.checkForAppUpdates(silent: false) }
+                }
+            }
+            CommandGroup(replacing: .appSettings) {
+                Button("设置…") {
+                    viewModel.navigateToSection(.settings)
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
+        }
     }
 }

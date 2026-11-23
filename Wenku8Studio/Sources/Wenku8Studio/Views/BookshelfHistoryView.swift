@@ -30,6 +30,7 @@ struct BookshelfHistoryView: View {
                 }
                 .padding(20)
             }
+            .scrollEdgeEffectHidden(true, for: .all)
         }
         .onAppear {
             if vm.isCloudSessionAvailable && !vm.isSyncingBookshelf {
@@ -39,49 +40,40 @@ struct BookshelfHistoryView: View {
     }
 
     private var headerBar: some View {
-        GlassEffectContainer(spacing: 12) {
-            HStack(spacing: 12) {
-                GlassSegmentedControl(selection: $filterScope, items: ShelfScope.allCases)
-                    .frame(maxWidth: 300)
+        HStack(spacing: 12) {
+            StudioSegmentedTabs(selection: $filterScope, items: ShelfScope.allCases)
+                .frame(maxWidth: 300)
 
-                GlassInputField(
-                    icon: "line.3.horizontal.decrease.circle",
-                    placeholder: "筛选书名或作者...",
-                    text: $filterText
-                )
-                .frame(maxWidth: 240)
+            StudioSearchField(
+                icon: "line.3.horizontal.decrease.circle",
+                placeholder: "筛选书名或作者...",
+                text: $filterText
+            )
+            .frame(maxWidth: 240)
 
-                Spacer()
+            Spacer()
 
-                Button {
-                    vm.syncBookshelfBidirectionally(silent: false)
-                } label: {
-                    if vm.isSyncingBookshelf {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Label("双向同步", systemImage: "arrow.triangle.2.circlepath.icloud")
+            StudioPillButton(
+                title: "双向同步",
+                systemImage: "arrow.triangle.2.circlepath.icloud",
+                size: .small,
+                isLoading: vm.isSyncingBookshelf,
+                isDisabled: vm.isSyncingBookshelf
+            ) {
+                vm.syncBookshelfBidirectionally(silent: false)
+            }
+            .help("已登录时自动与 wenku8 云端个人书架双向同步")
+
+            if !vm.history.isEmpty {
+                StudioPillButton(title: "清空浏览", systemImage: "trash", variant: .destructive, size: .small) {
+                    withAnimation {
+                        vm.clearHistory()
                     }
-                }
-                .buttonStyle(.glass)
-                .controlSize(.small)
-                .disabled(vm.isSyncingBookshelf)
-                .help("已登录时自动与 wenku8 云端个人书架双向同步")
-
-                if !vm.history.isEmpty {
-                    Button(role: .destructive) {
-                        withAnimation {
-                            vm.clearHistory()
-                        }
-                    } label: {
-                        Label("清空浏览", systemImage: "trash")
-                    }
-                    .buttonStyle(.glass)
-                    .controlSize(.small)
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
         }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
         .background(.bar)
     }
 
@@ -160,25 +152,19 @@ struct BookshelfHistoryView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Button("网页登录") {
+                    StudioPillButton(title: "网页登录", systemImage: "safari", variant: .primary, size: .small) {
                         vm.showWebLoginSheet = true
                     }
-                    .buttonStyle(.glassProminent)
-                    .controlSize(.small)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .glassEffect(.regular.tint(.orange.opacity(0.08)), in: RoundedRectangle(cornerRadius: 12))
+                .studioCard(cornerRadius: 12, padding: 12, tint: .orange)
             }
 
             if vm.cloudBookcaseGroups.count > 1 {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    GlassEffectContainer(spacing: 8) {
-                        HStack(spacing: 8) {
-                            groupChip(id: "all", title: "全部分组")
-                            ForEach(vm.cloudBookcaseGroups) { group in
-                                groupChip(id: group.id, title: group.title)
-                            }
+                    HStack(spacing: 8) {
+                        groupChip(id: "all", title: "全部分组")
+                        ForEach(vm.cloudBookcaseGroups) { group in
+                            groupChip(id: group.id, title: group.title)
                         }
                     }
                 }
@@ -220,21 +206,9 @@ struct BookshelfHistoryView: View {
     }
 
     private func groupChip(id: String, title: String) -> some View {
-        let active = vm.activeCloudGroupFilter == id
-        return Button {
+        StudioFilterChip(title: title, isSelected: vm.activeCloudGroupFilter == id) {
             vm.activeCloudGroupFilter = id
-        } label: {
-            Text(title)
-                .font(.caption)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 5)
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(active ? Color.accentColor : Color.primary)
-        .glassEffect(
-            active ? .regular.tint(.accentColor.opacity(0.22)).interactive() : .regular.interactive(),
-            in: .capsule
-        )
     }
 
     private var historySection: some View {

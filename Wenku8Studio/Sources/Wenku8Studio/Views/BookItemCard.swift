@@ -54,6 +54,7 @@ struct BookCardItem: Identifiable, Hashable {
 
 struct BookItemCard: View {
     @EnvironmentObject var vm: StudioViewModel
+    @Environment(\.studioAccentColor) private var studioAccent
 
     let item: BookCardItem
     var showBookmarkButton: Bool = true
@@ -81,41 +82,47 @@ struct BookItemCard: View {
 
                     HStack(spacing: 6) {
                         if showBookmarkButton, let onToggleBookmark {
-                            Button(action: onToggleBookmark) {
-                                Image(systemName: vm.isBookmarked(item.id) ? "bookmark.fill" : "bookmark")
-                                    .font(.caption)
-                                    .foregroundStyle(vm.isBookmarked(item.id) ? Color.accentColor : Color.secondary)
-                            }
-                            .buttonStyle(.glass)
-                            .controlSize(.small)
+                            StudioCircleButton(
+                                systemImage: vm.isBookmarked(item.id) ? "bookmark.fill" : "bookmark",
+                                variant: vm.isBookmarked(item.id) ? .primary : .secondary,
+                                size: .small,
+                                accessibilityLabel: vm.isBookmarked(item.id) ? "移出书架" : "加入书架",
+                                action: onToggleBookmark
+                            )
                             .help(vm.isBookmarked(item.id) ? "移出书架" : "加入书架")
                         }
 
                         if cloudGroups.count > 1, !item.cloudRecordId.isEmpty, let onMoveCloudGroup {
-                            Menu {
-                                ForEach(cloudGroups.filter { $0.id != item.cloudGroupId }) { group in
-                                    Button("移至 \(group.title)") {
-                                        onMoveCloudGroup(group.id)
-                                    }
+                            let groupOptions = cloudGroups.map { group in
+                                let isCurrent = (group.id == item.cloudGroupId)
+                                return StudioMenuOption(
+                                    id: group.id,
+                                    title: isCurrent ? "\(group.title)（当前）" : "移至 \(group.title)",
+                                    isSelected: isCurrent,
+                                    isDisabled: isCurrent
+                                ) {
+                                    onMoveCloudGroup(group.id)
                                 }
-                            } label: {
-                                Image(systemName: "folder")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
                             }
-                            .menuStyle(.borderlessButton)
-                            .frame(width: 24)
+                            StudioCircleMenu(
+                                systemImage: "chevron.down",
+                                variant: .secondary,
+                                size: .small,
+                                header: "移动到云端分组",
+                                accessibilityLabel: "移动到其他云端书架分组",
+                                options: groupOptions
+                            )
                             .help("移动到其他云端书架分组")
                         }
 
                         if let onDelete {
-                            Button(role: .destructive, action: onDelete) {
-                                Image(systemName: "trash")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .buttonStyle(.glass)
-                            .controlSize(.small)
+                            StudioCircleButton(
+                                systemImage: "trash",
+                                variant: .destructive,
+                                size: .small,
+                                accessibilityLabel: deleteTooltip ?? "删除",
+                                action: onDelete
+                            )
                             .help(deleteTooltip ?? "删除")
                         }
                     }
@@ -150,7 +157,7 @@ struct BookItemCard: View {
                     .foregroundStyle(.secondary)
                 }
 
-                if !item.tags.isEmpty {
+                if !vm.compactBookCards && !item.tags.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 4) {
                             ForEach(item.tags.prefix(5), id: \.self) { tag in
@@ -164,7 +171,7 @@ struct BookItemCard: View {
                     }
                 }
 
-                if !item.summary.isEmpty {
+                if vm.showCardSummary && !vm.compactBookCards && !item.summary.isEmpty {
                     Text(item.summary)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -206,11 +213,22 @@ struct BookItemCard: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
         .overlay {
             RoundedRectangle(cornerRadius: 14)
-                .strokeBorder(isHovered ? Color.accentColor.opacity(0.45) : Color.clear, lineWidth: 1.5)
+                .strokeBorder(
+                    isHovered ? studioAccent.opacity(0.48) : StudioTokens.hairlineStroke,
+                    lineWidth: isHovered ? 1.5 : 0.8
+                )
         }
+        .shadow(
+            color: isHovered ? studioAccent.opacity(0.12) : StudioTokens.cardShadowColor,
+            radius: isHovered ? 8 : 4,
+            y: isHovered ? 3 : 1.5
+        )
+        .scaleEffect(isHovered ? 1.008 : 1.0)
         .contentShape(RoundedRectangle(cornerRadius: 14))
         .onHover { hovering in
-            isHovered = hovering
+            withAnimation(.easeOut(duration: 0.14)) {
+                isHovered = hovering
+            }
         }
         .onTapGesture {
             vm.loadBook(inputOverride: item.id)

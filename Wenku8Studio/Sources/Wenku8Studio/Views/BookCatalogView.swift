@@ -29,11 +29,14 @@ struct BookCatalogView: View {
                         .padding(20)
                         .padding(.bottom, 76)
                     }
+                    .id(book.bookId)
+                    .scrollEdgeEffectHidden(true, for: .all)
 
                     bottomActionBar(book)
                         .padding(.horizontal, 20)
                         .padding(.bottom, 14)
                 }
+                .clipped()
             } else {
                 emptyStateView
             }
@@ -51,15 +54,14 @@ struct BookCatalogView: View {
                 .foregroundStyle(.secondary)
             Text("轻小说文库 · macOS 原生客户端与 EPUB 拼装工坊")
                 .font(.title3.weight(.semibold))
-            Text("在左侧输入书号（如 3115）或书籍网址，即可查看完整简介、可视化勾选分卷与章节、在线阅读或拼装定制 EPUB。")
+            Text("请在顶部搜索栏（⌘K）输入书号或轻小说文库网址，或前往「发现」与「书架与历史」选择作品，即可查看完整简介、勾选分卷章节、在线阅读或拼装定制 EPUB。")
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 480)
             HStack {
-                Button("试一试：书号 3115") {
-                    vm.loadBook(inputOverride: "3115")
+                StudioPillButton(title: "前往发现页浏览书库", systemImage: "safari.fill", variant: .primary) {
+                    vm.navigateToSection(.discovery)
                 }
-                .buttonStyle(.borderedProminent)
             }
         }
         .padding()
@@ -111,16 +113,15 @@ struct BookCatalogView: View {
                         }
                     }
                     Spacer()
-                    Button {
+                    let saved = vm.isBookmarked(book.bookId)
+                    StudioPillButton(
+                        title: saved ? "已在书架" : "加入书架",
+                        systemImage: saved ? "bookmark.fill" : "bookmark",
+                        variant: saved ? .primary : .secondary,
+                        size: .small
+                    ) {
                         vm.toggleBookmark(book)
-                    } label: {
-                        let saved = vm.isBookmarked(book.bookId)
-                        Label(
-                            saved ? "已在书架" : "加入书架",
-                            systemImage: saved ? "bookmark.fill" : "bookmark"
-                        )
                     }
-                    .buttonStyle(.bordered)
                     .help(vm.isCloudSessionAvailable ? "加入/移出书架（已登录，将直接同步到云端书架）" : "加入/移出书架（当前未登录，将暂存本地并在登录后同步）")
                 }
 
@@ -160,75 +161,48 @@ struct BookCatalogView: View {
                         .onTapGesture { showFullDescription.toggle() }
                 }
 
-                GlassEffectContainer(spacing: 8) {
+                ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
-                        Button {
+                        StudioFilterChip(title: "开始阅读", systemImage: "book.pages", isSelected: true) {
                             vm.openLastReadOrFirstChapter()
-                        } label: {
-                            Label("开始阅读", systemImage: "book.pages")
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
                         }
-                        .buttonStyle(.plain)
-                        .glassEffect(.regular.tint(.accentColor.opacity(0.18)).interactive(), in: .capsule)
 
-                        Button {
+                        StudioFilterChip(
+                            title: vm.showReviewsInspector ? "收起/查看书评" : "查看书评",
+                            systemImage: "bubble.left.and.bubble.right",
+                            isSelected: vm.showReviewsInspector
+                        ) {
                             vm.openReviewsInspectorForCurrentBook()
-                        } label: {
-                            Label(vm.showReviewsInspector ? "收起/查看书评" : "查看书评", systemImage: "bubble.left.and.bubble.right")
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
                         }
-                        .buttonStyle(.plain)
-                        .glassEffect(
-                            vm.showReviewsInspector ? .regular.tint(.accentColor.opacity(0.22)).interactive() : .regular.interactive(),
-                            in: .capsule
-                        )
 
-                        Button {
+                        StudioFilterChip(
+                            title: vm.isVotingBook ? "投票中..." : "推一下",
+                            systemImage: "hand.thumbsup",
+                            isSelected: false
+                        ) {
                             vm.voteCurrentBook()
-                        } label: {
-                            Label(vm.isVotingBook ? "投票中..." : "推一下", systemImage: "hand.thumbsup")
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
                         }
-                        .buttonStyle(.plain)
-                        .glassEffect(.regular.interactive(), in: .capsule)
                         .disabled(vm.isVotingBook)
                         .help("为本书投推荐票（每日可用账号推荐次数）")
 
-                        Button {
+                        StudioFilterChip(title: "同作者作品", systemImage: "person.2", isSelected: false) {
                             vm.loadAuthorWorks(author: book.author)
-                        } label: {
-                            Label("同作者作品", systemImage: "person.2")
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
                         }
-                        .buttonStyle(.plain)
-                        .glassEffect(.regular.interactive(), in: .capsule)
 
-                        Button {
+                        StudioFilterChip(title: "拼装设置", systemImage: "slider.horizontal.3", isSelected: false) {
                             vm.scrollToAssemblyToken = UUID()
-                            vm.selectedSection = .settings
-                        } label: {
-                            Label("拼装设置", systemImage: "slider.horizontal.3")
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
+                            vm.navigateToSettingsCategory(.assembly)
                         }
-                        .buttonStyle(.plain)
-                        .glassEffect(.regular.interactive(), in: .capsule)
 
-                        Spacer()
+                        Spacer(minLength: 12)
                         Text("来源：\(book.baseURL.replacingOccurrences(of: "https://", with: ""))")
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                     }
-                    .font(.callout)
                 }
             }
         }
-        .padding(16)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .studioCard(cornerRadius: StudioTokens.cardRadiusLarge, padding: 16)
     }
 
     private func badge(_ text: String, color: Color) -> some View {
@@ -242,29 +216,19 @@ struct BookCatalogView: View {
 
     private func recommendationsStrip(_ book: BookDetail) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("同分类推荐（点击直达）")
+            Text("同分类推荐")
                 .font(.headline)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
                     ForEach(book.recommendations) { rec in
-                        Button {
+                        RecommendationBookChip(rec: rec) {
                             vm.loadBook(inputOverride: rec.id)
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: rec.isCompleted ? "checkmark.seal.fill" : "book.fill")
-                                    .foregroundStyle(rec.isCompleted ? .green : .accentColor)
-                                Text(rec.title)
-                                    .lineLimit(1)
-                            }
-                            .font(.caption)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
                         }
-                        .buttonStyle(.plain)
                     }
                 }
+                .padding(.vertical, 2)
             }
+            .scrollEdgeEffectHidden(true, for: .all)
         }
     }
 
@@ -274,55 +238,46 @@ struct BookCatalogView: View {
                 Text("分卷与章节目录（共 \(book.volumes.count) 卷）")
                     .font(.headline)
                 Spacer()
-                GlassEffectContainer(spacing: 8) {
-                    HStack(spacing: 8) {
-                        Button {
-                            vm.selectAllChapters()
-                        } label: {
-                            Label(
-                                vm.areAllChaptersSelected ? "已全选整本" : "全选整本",
-                                systemImage: vm.areAllChaptersSelected ? "checkmark.circle.fill" : "checklist.checked"
-                            )
-                        }
-                        .foregroundStyle(vm.areAllChaptersSelected ? Color.accentColor : Color.primary)
-                        Button("仅首卷") { vm.selectFirstVolumeOnly() }
-                        Button("清空") { vm.clearSelection() }
-                        Button("反选") { vm.invertSelection() }
-                        Button("仅含插图卷") { vm.selectIllustratedVolumesOnly() }
+                HStack(spacing: 8) {
+                    StudioPillButton(
+                        title: vm.areAllChaptersSelected ? "已全选整本" : "全选整本",
+                        systemImage: vm.areAllChaptersSelected ? "checkmark.circle.fill" : "checklist.checked",
+                        variant: vm.areAllChaptersSelected ? .primary : .secondary,
+                        size: .small
+                    ) {
+                        vm.selectAllChapters()
                     }
-                    .buttonStyle(.glass)
-                    .controlSize(.small)
+                    StudioPillButton(title: "仅首卷", size: .small) { vm.selectFirstVolumeOnly() }
+                    StudioPillButton(title: "清空", size: .small) { vm.clearSelection() }
+                    StudioPillButton(title: "反选", size: .small) { vm.invertSelection() }
+                    StudioPillButton(title: "仅含插图卷", size: .small) { vm.selectIllustratedVolumesOnly() }
                 }
             }
 
-            GlassEffectContainer(spacing: 10) {
-                HStack(spacing: 10) {
-                    GlassInputField(
-                        icon: "magnifyingglass",
-                        placeholder: "按章节名过滤...",
-                        text: $vm.chapterSearchQuery
-                    )
-                    .frame(maxWidth: 230)
+            HStack(spacing: 10) {
+                StudioSearchField(
+                    icon: "magnifyingglass",
+                    placeholder: "按章节名过滤...",
+                    text: $vm.chapterSearchQuery
+                )
+                .frame(maxWidth: 230)
 
-                    GlassInputField(
-                        icon: "number",
-                        placeholder: "按卷号勾选（如 1-3 或 1,2,4）",
-                        text: $vm.volumeRangeInput,
-                        onSubmit: { vm.applyVolumeRangeSelection() }
-                    )
-                    .frame(maxWidth: 250)
+                StudioSearchField(
+                    icon: "number",
+                    placeholder: "按卷号勾选（如 1-3 或 1,2,4）",
+                    text: $vm.volumeRangeInput,
+                    onSubmit: { vm.applyVolumeRangeSelection() }
+                )
+                .frame(maxWidth: 250)
 
-                    Button("应用卷号") {
-                        vm.applyVolumeRangeSelection()
-                    }
-                    .buttonStyle(.glass)
-                    .controlSize(.small)
-
-                    Spacer()
-
-                    GlassSegmentedControl(selection: $vm.assemblyConfig.exportMode, items: ExportMode.allCases)
-                        .frame(maxWidth: 290)
+                StudioPillButton(title: "应用卷号", size: .small) {
+                    vm.applyVolumeRangeSelection()
                 }
+
+                Spacer()
+
+                StudioSegmentedTabs(selection: $vm.assemblyConfig.exportMode, items: ExportMode.allCases)
+                    .frame(maxWidth: 300)
             }
         }
     }
@@ -360,56 +315,48 @@ struct BookCatalogView: View {
     }
 
     private func bottomActionBar(_ book: BookDetail) -> some View {
-        GlassEffectContainer(spacing: 12) {
-            HStack(spacing: 14) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("已选 \(vm.selectedVolumesCount) 卷 · \(vm.selectedBodyChaptersCount) 个正文章节")
-                        .font(.callout.weight(.medium))
-                        .contentTransition(.numericText())
-                    Text("输出至：\(vm.outputDirectoryPath)（\(vm.assemblyConfig.exportMode.rawValue)）")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+        HStack(spacing: 14) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("已选 \(vm.selectedVolumesCount) 卷 · \(vm.selectedBodyChaptersCount) 个正文章节")
+                    .font(.callout.weight(.medium))
+                    .contentTransition(.numericText())
+                Text("输出至：\(vm.outputDirectoryPath)（\(vm.assemblyConfig.exportMode.rawValue)）")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            if vm.isDownloading {
+                ProgressView(value: vm.progressFraction)
+                    .frame(width: 140)
+                StudioPillButton(title: "取消下载", systemImage: "stop.fill", variant: .destructive) {
+                    vm.cancelDownload()
                 }
+            } else {
+                StudioPillButton(
+                    title: "整本一键转 EPUB",
+                    systemImage: "books.vertical.fill",
+                    size: .large,
+                    isDisabled: book.volumes.isEmpty
+                ) {
+                    vm.downloadFullBookAsSingleEPUB()
+                }
+                .help("自动全选所有分卷与章节，并合并导出为单个完整 EPUB")
 
-                Spacer()
-
-                if vm.isDownloading {
-                    ProgressView(value: vm.progressFraction)
-                        .frame(width: 140)
-                    Button("取消下载") {
-                        vm.cancelDownload()
-                    }
-                    .buttonStyle(.glass)
-                } else {
-                    Button {
-                        vm.downloadFullBookAsSingleEPUB()
-                    } label: {
-                        Label("整本一键转 EPUB", systemImage: "books.vertical.fill")
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                    }
-                    .buttonStyle(.glass)
-                    .controlSize(.large)
-                    .disabled(book.volumes.isEmpty)
-                    .help("自动全选所有分卷与章节，并合并导出为单个完整 EPUB")
-
-                    Button {
-                        vm.startDownloadSelected()
-                    } label: {
-                        Label("下载选中 EPUB", systemImage: "arrow.down.doc.fill")
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                    }
-                    .buttonStyle(.glassProminent)
-                    .controlSize(.large)
-                    .disabled(vm.selectedChapterIds.isEmpty)
+                StudioPillButton(
+                    title: "下载选中 EPUB",
+                    systemImage: "arrow.down.doc.fill",
+                    variant: .primary,
+                    size: .large,
+                    isDisabled: vm.selectedChapterIds.isEmpty
+                ) {
+                    vm.startDownloadSelected()
                 }
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 12)
-            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18))
         }
+        .studioCard(cornerRadius: StudioTokens.cardRadiusLarge, padding: 14)
     }
 }
 
@@ -517,5 +464,69 @@ private struct VolumeSectionCard: View {
         case 1: return "minus.square.fill"
         default: return "square"
         }
+    }
+}
+
+private struct RecommendationBookChip: View {
+    let rec: RecommendedBook
+    let action: () -> Void
+
+    @Environment(\.studioAccentColor) private var studioAccent
+    @State private var isHovered = false
+    @State private var isPressed = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: rec.isCompleted ? "checkmark.seal.fill" : "book.fill")
+                    .foregroundStyle(rec.isCompleted ? .green : studioAccent)
+                Text(rec.title)
+                    .foregroundStyle(isHovered ? studioAccent : Color.primary)
+                    .lineLimit(1)
+            }
+            .font(.caption.weight(isHovered ? .medium : .regular))
+            .padding(.horizontal, 11)
+            .padding(.vertical, 6)
+            .background {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(
+                        isHovered
+                            ? studioAccent.opacity(0.11)
+                            : Color(nsColor: .controlBackgroundColor)
+                    )
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(
+                        isHovered ? studioAccent.opacity(0.45) : StudioTokens.hairlineStroke,
+                        lineWidth: isHovered ? 1.1 : 0.8
+                    )
+            }
+            .shadow(
+                color: isHovered ? studioAccent.opacity(0.14) : StudioTokens.cardShadowColor,
+                radius: isHovered ? 5 : 2,
+                y: isHovered ? 2 : 1
+            )
+            .scaleEffect(isPressed ? 0.96 : (isHovered ? 1.02 : 1.0))
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.14)) {
+                isHovered = hovering
+            }
+        }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in
+                    if !isPressed {
+                        withAnimation(.easeOut(duration: 0.08)) { isPressed = true }
+                    }
+                }
+                .onEnded { _ in
+                    withAnimation(.easeOut(duration: 0.14)) { isPressed = false }
+                }
+        )
+        .help("点击打开《\(rec.title)》目录")
     }
 }

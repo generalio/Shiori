@@ -30,22 +30,19 @@ struct TasksAndLogsView: View {
                 }
                 Spacer()
                 if vm.isDownloading {
-                    Button("取消任务") {
+                    StudioPillButton(title: "取消任务", systemImage: "stop.fill", variant: .destructive) {
                         vm.cancelDownload()
                     }
-                    .buttonStyle(.glass)
                 } else {
-                    Button("打开下载目录") {
+                    StudioPillButton(title: "打开下载目录", systemImage: "folder") {
                         vm.openOutputFolder()
                     }
-                    .buttonStyle(.glass)
                 }
             }
             ProgressView(value: vm.progressFraction)
                 .progressViewStyle(.linear)
         }
-        .padding(14)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14))
+        .studioCard(cornerRadius: StudioTokens.cardRadius, padding: 14)
     }
 
     private var outputsSection: some View {
@@ -55,12 +52,10 @@ struct TasksAndLogsView: View {
                     .font(.headline)
                 Spacer()
                 if !vm.outputs.isEmpty {
-                    Button("清空记录") {
+                    StudioPillButton(title: "清空记录", systemImage: "trash", size: .small) {
                         vm.outputs.removeAll()
                         vm.savePersistedState()
                     }
-                    .buttonStyle(.glass)
-                    .controlSize(.small)
                 }
             }
 
@@ -78,18 +73,13 @@ struct TasksAndLogsView: View {
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
-                        GlassEffectContainer(spacing: 8) {
-                            HStack(spacing: 8) {
-                                Button("在 Finder 中显示") {
-                                    vm.revealInFinder(item.filePath)
-                                }
-                                .buttonStyle(.glass)
-                                Button("用默认阅读器打开") {
-                                    vm.openFileWithDefaultReader(item.filePath)
-                                }
-                                .buttonStyle(.glassProminent)
+                        HStack(spacing: 8) {
+                            StudioPillButton(title: "在 Finder 中显示", systemImage: "folder", size: .small) {
+                                vm.revealInFinder(item.filePath)
                             }
-                            .controlSize(.small)
+                            StudioPillButton(title: "用默认阅读器打开", systemImage: "book", variant: .primary, size: .small) {
+                                vm.openFileWithDefaultReader(item.filePath)
+                            }
                         }
                     }
                     .padding(.vertical, 4)
@@ -104,9 +94,9 @@ struct TasksAndLogsView: View {
                 Text("运行日志")
                     .font(.headline)
                 Spacer()
-                Button("清空") { vm.logs.removeAll() }
-                    .buttonStyle(.glass)
-                    .controlSize(.small)
+                StudioPillButton(title: "清空", systemImage: "trash", size: .small) {
+                    vm.logs.removeAll()
+                }
             }
 
             ScrollViewReader { proxy in

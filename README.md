@@ -10,6 +10,9 @@
     <a href="https://github.com/generalio/lightnovel-download/releases">
       <img src="https://img.shields.io/github/v/release/generalio/lightnovel-download?style=flat-square&color=559DCD" alt="Release"/>
     </a>
+    <a href="LICENSE">
+      <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="MIT License"/>
+    </a>
     <img src="https://img.shields.io/badge/macOS-26%2B%20Liquid%20Glass-blue?style=flat-square&logo=apple" alt="macOS 26+"/>
     <img src="https://img.shields.io/badge/Swift-5.10%20%2F%20Xcode-orange?style=flat-square&logo=swift" alt="Swift"/>
     <img src="https://img.shields.io/badge/Python-3.11%2B%20CLI-3776AB?style=flat-square&logo=python" alt="Python CLI"/>
@@ -21,7 +24,8 @@
     <a href="#快速开始">快速开始</a> •
     <a href="#cli-命令行指南">CLI 指南</a> •
     <a href="#epub-拼装与自定义">EPUB 拼装</a> •
-    <a href="#自动构建与发版">CI/CD 发版</a>
+    <a href="#致谢与原项目">致谢</a> •
+    <a href="#开源许可">开源许可</a>
   </p>
 </div>
 
@@ -178,8 +182,22 @@ lightnovel-download/
 ├── Editer.py                   # Python 核心抓取、检索、书评与 EPUB 打包引擎
 ├── utils.py                    # Python EPUB 2/3 模板与 XML 转义工具
 ├── lightnovel.py               # Python CLI 入口
-└── tests/test_core.py          # Python pytest 单元测试
+├── tests/test_core.py          # Python pytest 单元测试
+├── AGENTS.md                   # 项目构建与 UI 组件开发规范
+└── LICENSE                     # MIT 开源许可证
 ```
+
+---
+
+## 致谢与原项目
+
+本项目的 Python 核心解析与初期 EPUB 构建思路源自开源项目 **[ShqWW/lightnovel-download](https://github.com/ShqWW/lightnovel-download)**（原作者 `ShqWW` / 王老板）。在此基础上，本仓库进行了独立架构演进与大幅功能重构——新增了原生 macOS SwiftUI 客户端（**Wenku8 Studio**）、`Wenku8Core` 解析/云端书架双向同步引擎、EPUB 3.0 组装与仿真阅读器，以及扩展的 CLI 与自动化 CI/CD 发版管线，特此向原项目致谢。
+
+---
+
+## 开源许可
+
+本项目采用 **[MIT License](LICENSE)** 开源发布。
 
 ---
 

@@ -21,22 +21,18 @@ struct WebLoginSheet: View {
 
                 Spacer()
 
-                GlassEffectContainer(spacing: 8) {
-                    HStack(spacing: 8) {
-                        Button("刷新") {
-                            webViewRef?.reload()
-                        }
-                        .buttonStyle(.glass)
+                HStack(spacing: 8) {
+                    StudioCircleButton(systemImage: "arrow.clockwise", size: .small, accessibilityLabel: "刷新页面") {
+                        webViewRef?.reload()
+                    }
+                    .help("刷新页面")
 
-                        Button("取消") {
-                            vm.showWebLoginSheet = false
-                        }
-                        .buttonStyle(.glass)
+                    StudioPillButton(title: "取消", size: .small) {
+                        vm.showWebLoginSheet = false
+                    }
 
-                        Button("提取 Cookie 并验证") {
-                            extractCookies()
-                        }
-                        .buttonStyle(.glassProminent)
+                    StudioPillButton(title: "提取 Cookie 并验证", systemImage: "checkmark.shield.fill", variant: .primary, size: .small) {
+                        extractCookies()
                     }
                 }
             }

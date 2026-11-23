@@ -1,40 +1,622 @@
+import AppKit
 import SwiftUI
 import Wenku8Core
 
 struct SettingsAndAssemblyView: View {
     @EnvironmentObject var vm: StudioViewModel
+    @Environment(\.studioAccentColor) private var studioAccent
+    @State private var searchText: String = ""
     private let builder = EPUBBuilder()
 
+    private var primaryCategories: [SettingsCategory] {
+        [.general, .appearance, .reader, .account]
+    }
+
+    private var secondaryCategories: [SettingsCategory] {
+        [.assembly]
+    }
+
+    private var infoCategories: [SettingsCategory] {
+        [.about]
+    }
+
+    private func matchesSearch(_ category: SettingsCategory) -> Bool {
+        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return true }
+        let keywords: [SettingsCategory: String] = [
+            .general: "通用 站点 镜像 wenku8 下载 目录 并发 延迟 网络",
+            .appearance: "外观 主题 浅色 深色 配色 强调色 自定义 页面 启动 侧边栏 卡片",
+            .reader: "阅读器 字体 纸张 仿真 翻页 滚动 繁简 字号 行高 语音",
+            .account: "账号 云端 cookie 登录 刷新 保活 书架 积分",
+            .assembly: "epub 拼装 封面 彩插 排版 清洗 缩进 模板 文件名",
+            .about: "关于 版本 更新 github 重置 恢复默认"
+        ]
+        let corpus = "\(category.rawValue) \(category.subtitle) \(keywords[category] ?? "")".lowercased()
+        return corpus.contains(q)
+    }
+
     var body: some View {
-        ScrollViewReader { proxy in
-            Form {
-                Section("站点与自动回退") {
-                    Picker("预设站点", selection: $vm.baseURL) {
-                        Text("备用主站（推荐）：https://www.wenku8.cc").tag("https://www.wenku8.cc")
-                        Text("原主站（受限自动回退）：https://www.wenku8.net").tag("https://www.wenku8.net")
+        HStack(spacing: 0) {
+            settingsSidebar
+                .frame(width: 222)
+                .background(Color(nsColor: .underPageBackgroundColor).opacity(0.6))
+
+            Divider().opacity(0.7)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    categoryHeader(vm.activeSettingsCategory)
+
+                    switch vm.activeSettingsCategory {
+                    case .general:
+                        generalSettingsContent
+                    case .appearance:
+                        appearanceSettingsContent
+                    case .reader:
+                        readerSettingsContent
+                    case .account:
+                        accountSettingsContent
+                    case .assembly:
+                        assemblySettingsContent
+                    case .about:
+                        aboutSettingsContent
+                    }
+                }
+                .padding(.horizontal, 28)
+                .padding(.vertical, 24)
+                .frame(maxWidth: 780, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+            .scrollEdgeEffectHidden(true, for: .all)
+            .background(Color(nsColor: .windowBackgroundColor))
+        }
+        .onChange(of: vm.scrollToAssemblyToken) { _, token in
+            if token != nil {
+                vm.activeSettingsCategory = .assembly
+            }
+        }
+        .onChange(of: vm.baseURL) { _, _ in
+            Task { await vm.syncClientSettings() }
+        }
+        .onChange(of: vm.maxConcurrency) { _, _ in
+            vm.savePersistedState()
+        }
+        .onChange(of: vm.politeDelaySeconds) { _, _ in
+            Task { await vm.syncClientSettings() }
+        }
+        .onChange(of: vm.assemblyConfig) { _, _ in
+            vm.savePersistedState()
+        }
+    }
+
+    // MARK: - Left Category Sidebar
+
+    private var settingsSidebar: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            StudioSearchField(
+                icon: "magnifyingglass",
+                placeholder: "搜索设置",
+                text: $searchText
+            )
+            .padding(.horizontal, 12)
+            .padding(.top, 14)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    categoryListGroup(title: nil, items: primaryCategories.filter(matchesSearch))
+                    categoryListGroup(title: "内容与构建", items: secondaryCategories.filter(matchesSearch))
+                    categoryListGroup(title: nil, items: infoCategories.filter(matchesSearch))
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+            }
+
+            Spacer(minLength: 0)
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.callout)
+                        .foregroundStyle(studioAccent)
+                        .frame(width: 22, height: 22)
+                        .background(studioAccent.opacity(0.12), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("高级设置")
+                            .font(.caption.weight(.semibold))
+                        Text("显示全部选项")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
 
-                    GlassInputField(
-                        icon: "globe",
-                        placeholder: "自定义站点地址（如 https://www.wenku8.cc）",
-                        text: $vm.baseURL
-                    )
+                    Spacer()
 
-                    Text("当默认站点 https://www.wenku8.cc 无法连接时，客户端会自动尝试回退主站 https://www.wenku8.net。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Toggle("", isOn: $vm.showAdvancedSettings)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .onChange(of: vm.showAdvancedSettings) { _, _ in
+                            vm.savePersistedState()
+                        }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(Color(nsColor: .controlBackgroundColor).opacity(0.75), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .strokeBorder(StudioTokens.hairlineStroke, lineWidth: 0.8)
                 }
 
-                Section("账号 Cookie（可选，用于解锁全站搜索与榜单）") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        GlassInputField(
+                Text("Wenku8 Studio \(vm.appVersionDisplay) (\(vm.buildNumberDisplay))")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 6)
+            }
+            .padding(12)
+        }
+    }
+
+    @ViewBuilder
+    private func categoryListGroup(title: String?, items: [SettingsCategory]) -> some View {
+        if !items.isEmpty {
+            VStack(alignment: .leading, spacing: 3) {
+                if let title {
+                    Text(title)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 10)
+                        .padding(.bottom, 2)
+                }
+                ForEach(items) { cat in
+                    SettingsCategorySidebarRow(
+                        category: cat,
+                        isSelected: vm.activeSettingsCategory == cat
+                    ) {
+                        vm.activeSettingsCategory = cat
+                    }
+                }
+            }
+        }
+    }
+
+    private func categoryHeader(_ category: SettingsCategory) -> some View {
+        HStack(spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(category.tintColor.opacity(0.14))
+                    .frame(width: 40, height: 40)
+                Image(systemName: category.icon)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(category.tintColor)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(category.rawValue)
+                    .font(.title2.weight(.bold))
+                Text(category.subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.bottom, 4)
+    }
+
+    // MARK: - 1. 通用 (General)
+
+    private var generalSettingsContent: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            SettingsCardGroup(title: "站点与镜像") {
+                SettingsRow(title: "首选站点", subtitle: "主站受限时客户端将自动尝试镜像回退") {
+                    Picker("", selection: $vm.baseURL) {
+                        Text("备用主站（推荐）· wenku8.cc").tag("https://www.wenku8.cc")
+                        Text("原主站（自动回退）· wenku8.net").tag("https://www.wenku8.net")
+                    }
+                    .labelsHidden()
+                    .frame(width: 240)
+                }
+
+                if vm.showAdvancedSettings {
+                    Divider()
+                    SettingsRow(title: "自定义站点地址", subtitle: "如使用其他兼容镜像域名，可直接填写完整 HTTPS 地址") {
+                        StudioSearchField(
+                            icon: "globe",
+                            placeholder: "https://www.wenku8.cc",
+                            text: $vm.baseURL
+                        )
+                        .frame(width: 250)
+                    }
+                }
+            }
+
+            SettingsCardGroup(title: "下载与存储") {
+                SettingsRow(title: "EPUB 输出目录", subtitle: vm.outputDirectoryPath) {
+                    HStack(spacing: 8) {
+                        StudioPillButton(title: "打开目录", systemImage: "folder", size: .small) {
+                            vm.openOutputFolder()
+                        }
+                        StudioPillButton(title: "更改...", size: .small) {
+                            vm.chooseOutputDirectory()
+                        }
+                    }
+                }
+
+                if vm.showAdvancedSettings {
+                    Divider()
+                    SettingsRow(title: "图片并发线程数", subtitle: "控制下载章节插图时的最大并发请求数（推荐 4）") {
+                        Stepper("\(vm.maxConcurrency) 线程", value: $vm.maxConcurrency, in: 1...16)
+                            .monospacedDigit()
+                    }
+
+                    Divider()
+                    SettingsRow(title: "章节请求间隔", subtitle: "每次抓取正文的礼貌限速延迟（\(String(format: "%.2f", vm.politeDelaySeconds)) 秒）") {
+                        Slider(value: $vm.politeDelaySeconds, in: 0...1.5, step: 0.05)
+                            .frame(width: 200)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - 2. 外观与主题 (Appearance & Custom Pages)
+
+    private var appearanceSettingsContent: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            SettingsCardGroup(title: "主题配色") {
+                SettingsRow(title: "界面明暗模式", subtitle: "切换浅色、深色或跟随 macOS 系统外观") {
+                    StudioSegmentedTabs(selection: $vm.appColorScheme, items: AppColorScheme.allCases)
+                        .frame(width: 220)
+                        .onChange(of: vm.appColorScheme) { _, _ in
+                            vm.savePersistedState()
+                        }
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("主题强调色")
+                            .font(.callout.weight(.medium))
+                        Text("应用于侧边栏高亮、主按钮、卡片选中状态与阅读器控件")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    HStack(spacing: 10) {
+                        ForEach(AppAccentTheme.allCases) { preset in
+                            let isSelected = vm.appAccentTheme == preset
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.16)) {
+                                    vm.appAccentTheme = preset
+                                }
+                                vm.savePersistedState()
+                            } label: {
+                                VStack(spacing: 5) {
+                                    ZStack {
+                                        Circle()
+                                            .fill(preset.swatchColor)
+                                            .frame(width: 26, height: 26)
+                                            .overlay {
+                                                Circle()
+                                                    .strokeBorder(Color.primary.opacity(0.14), lineWidth: 1)
+                                            }
+                                        if isSelected {
+                                            Image(systemName: "checkmark")
+                                                .font(.caption2.weight(.bold))
+                                                .foregroundStyle(.white)
+                                        }
+                                    }
+                                    .padding(3)
+                                    .overlay {
+                                        if isSelected {
+                                            Circle()
+                                                .strokeBorder(preset.swatchColor, lineWidth: 1.8)
+                                        }
+                                    }
+
+                                    Text(preset.rawValue)
+                                        .font(.caption2.weight(isSelected ? .semibold : .regular))
+                                        .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+            }
+
+            SettingsCardGroup(title: "自定义启动与页面") {
+                SettingsRow(title: "应用默认启动页", subtitle: "启动 Wenku8 Studio 时默认呈现的功能工作区") {
+                    let startupCandidates = SidebarSection.allCases.filter { vm.isSidebarSectionVisible($0) && $0 != .settings }
+                    Picker("", selection: $vm.startupSection) {
+                        ForEach(startupCandidates) { sec in
+                            Text(sec.rawValue).tag(sec)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 170)
+                    .onChange(of: vm.startupSection) { _, _ in
+                        vm.savePersistedState()
+                    }
+                }
+
+                Divider()
+
+                SettingsRow(title: "发现页初始内容", subtitle: "首次进入「发现」页面时自动载入的榜单或引导页") {
+                    Picker("", selection: $vm.defaultDiscoveryChannel) {
+                        ForEach(DiscoveryHomeChannel.allCases) { ch in
+                            Text(ch.rawValue).tag(ch)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 170)
+                    .onChange(of: vm.defaultDiscoveryChannel) { _, _ in
+                        vm.savePersistedState()
+                    }
+                }
+
+                Divider()
+
+                SettingsRow(title: "侧边栏当前阅读快捷卡片", subtitle: "在左侧栏底部展示最近打开的书籍，点击一键回到目录") {
+                    Toggle("", isOn: $vm.showSidebarQuickBookCard)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .onChange(of: vm.showSidebarQuickBookCard) { _, _ in
+                            vm.savePersistedState()
+                        }
+                }
+            }
+
+            SettingsCardGroup(title: "自定义侧边栏板块") {
+                ForEach(Array([SidebarSection.bookshelf, .catalog, .reader, .tasks].enumerated()), id: \.element.id) { idx, section in
+                    if idx > 0 { Divider() }
+                    SettingsRow(
+                        title: section.rawValue,
+                        subtitle: "控制左侧导航栏是否显示「\(section.rawValue)」页面入口"
+                    ) {
+                        Toggle("", isOn: Binding(
+                            get: { vm.isSidebarSectionVisible(section) },
+                            set: { vm.setSidebarSection(section, visible: $0) }
+                        ))
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                    }
+                }
+            }
+
+            SettingsCardGroup(title: "列表卡片密度") {
+                SettingsRow(title: "显示作品简介摘要", subtitle: "在发现页与书架卡片中显示两行简介预览") {
+                    Toggle("", isOn: $vm.showCardSummary)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .onChange(of: vm.showCardSummary) { _, _ in
+                            vm.savePersistedState()
+                        }
+                }
+
+                Divider()
+
+                SettingsRow(title: "紧凑卡片模式", subtitle: "减少卡片内标签与边距，同屏容纳更多书籍") {
+                    Toggle("", isOn: $vm.compactBookCards)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .onChange(of: vm.compactBookCards) { _, _ in
+                            vm.savePersistedState()
+                        }
+                }
+            }
+        }
+    }
+
+    // MARK: - 3. 阅读器 (Reader)
+
+    private var readerSettingsContent: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            SettingsCardGroup(title: "默认阅读体验") {
+                SettingsRow(title: "默认翻页模式", subtitle: "支持仿真贝塞尔卷页、水平滑动或连续上下滚动") {
+                    StudioSegmentedTabs(selection: $vm.readerPageMode, items: ReaderPageMode.allCases)
+                        .frame(width: 240)
+                        .onChange(of: vm.readerPageMode) { _, _ in vm.savePersistedState() }
+                }
+
+                Divider()
+
+                SettingsRow(title: "阅读纸张主题", subtitle: "选择最适合长时间阅读的背景色调") {
+                    HStack(spacing: 10) {
+                        ForEach(ReaderTheme.allCases) { theme in
+                            let selected = vm.readerTheme == theme
+                            Button {
+                                vm.readerTheme = theme
+                                vm.savePersistedState()
+                            } label: {
+                                VStack(spacing: 4) {
+                                    Circle()
+                                        .fill(theme.swatchColor)
+                                        .frame(width: 24, height: 24)
+                                        .overlay {
+                                            Circle()
+                                                .strokeBorder(selected ? studioAccent : Color.primary.opacity(0.18), lineWidth: selected ? 2.2 : 1)
+                                        }
+                                    Text(theme.rawValue)
+                                        .font(.caption2.weight(selected ? .semibold : .regular))
+                                        .foregroundStyle(selected ? studioAccent : .secondary)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+
+                Divider()
+
+                SettingsRow(title: "默认字体", subtitle: "可选系统默认字体、衬线宋体、黑体或本地任意字体") {
+                    StudioSegmentedTabs(selection: $vm.readerFontFamily, items: ReaderFontFamily.allCases)
+                        .frame(width: 260)
+                        .onChange(of: vm.readerFontFamily) { _, _ in vm.savePersistedState() }
+                }
+
+                if vm.readerFontFamily == .custom {
+                    Divider()
+                    SettingsRow(title: "指定系统字体族", subtitle: "选择 macOS 已安装字体") {
+                        Picker("", selection: $vm.readerCustomFontName) {
+                            ForEach(vm.availableSystemFontFamilies, id: \.self) { fam in
+                                Text(fam).tag(fam)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 220)
+                        .onChange(of: vm.readerCustomFontName) { _, _ in vm.savePersistedState() }
+                    }
+                }
+
+                Divider()
+
+                SettingsRow(title: "默认简繁转换", subtitle: "实时切换正文与标题显示用字") {
+                    StudioSegmentedTabs(selection: $vm.readerScriptMode, items: ReaderScriptMode.allCases)
+                        .frame(width: 220)
+                        .onChange(of: vm.readerScriptMode) { _, _ in vm.savePersistedState() }
+                }
+            }
+
+            SettingsCardGroup(title: "版式与排版参数") {
+                SettingsRow(title: "正文字号：\(Int(vm.readerFontSize)) pt", subtitle: "调节正文文字大小（13 - 30 pt）") {
+                    Slider(value: $vm.readerFontSize, in: 13...30, step: 1)
+                        .frame(width: 200)
+                        .onChange(of: vm.readerFontSize) { _, _ in vm.savePersistedState() }
+                }
+
+                Divider()
+
+                SettingsRow(title: "行间距：\(Int(vm.readerLineSpacing)) pt", subtitle: "调节行与行之间的垂直呼吸感") {
+                    Slider(value: $vm.readerLineSpacing, in: 4...22, step: 1)
+                        .frame(width: 200)
+                        .onChange(of: vm.readerLineSpacing) { _, _ in vm.savePersistedState() }
+                }
+
+                if vm.showAdvancedSettings {
+                    Divider()
+
+                    SettingsRow(title: "版心最大宽度：\(Int(vm.readerColumnWidth)) px", subtitle: "双页模式或宽屏窗口下正文的自适应列宽") {
+                        Slider(value: $vm.readerColumnWidth, in: 540...1280, step: 20)
+                            .frame(width: 200)
+                            .onChange(of: vm.readerColumnWidth) { _, _ in vm.savePersistedState() }
+                    }
+
+                    Divider()
+
+                    SettingsRow(title: "页边安全留白：\(Int(vm.readerEdgePadding)) pt", subtitle: "文本与纸张边缘的内边距") {
+                        Slider(value: $vm.readerEdgePadding, in: 10...64, step: 2)
+                            .frame(width: 200)
+                            .onChange(of: vm.readerEdgePadding) { _, _ in vm.savePersistedState() }
+                    }
+
+                    Divider()
+
+                    SettingsRow(title: "仿真/平移双页对开", subtitle: "宽窗口下左右两栏并排阅读，模拟实体书对页") {
+                        Toggle("", isOn: $vm.readerDualPageEnabled)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .onChange(of: vm.readerDualPageEnabled) { _, _ in vm.savePersistedState() }
+                    }
+
+                    Divider()
+
+                    SettingsRow(title: "段首自动缩进两个汉字", subtitle: "开启后自动为段落增加标准中文首行缩进") {
+                        Toggle("", isOn: $vm.readerIndentEnabled)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .onChange(of: vm.readerIndentEnabled) { _, _ in vm.savePersistedState() }
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - 4. 账号与云端 (Account & Cloud)
+
+    private var accountSettingsContent: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            if let profile = vm.userProfile, !profile.username.isEmpty {
+                SettingsCardGroup(title: "当前已登录账号") {
+                    HStack(spacing: 14) {
+                        Image(systemName: "person.crop.circle.badge.checkmark")
+                            .font(.system(size: 34))
+                            .foregroundStyle(.green)
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("\(profile.nickname.isEmpty ? profile.username : profile.nickname) · \(profile.level.isEmpty ? "会员" : profile.level)")
+                                .font(.headline)
+                            Text("积分 \(profile.holdingPoints.isEmpty ? "-" : profile.holdingPoints) · 经验 \(profile.experienceValue.isEmpty ? "-" : profile.experienceValue) · 每日推荐 \(profile.dailyVoteQuota.isEmpty ? "-" : profile.dailyVoteQuota) 次 · 书架上限 \(profile.bookcaseCapacity.isEmpty ? "-" : profile.bookcaseCapacity) 本")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer()
+
+                        StudioPillButton(title: "打开书架", systemImage: "books.vertical", variant: .primary, size: .small) {
+                            vm.navigateToSection(.bookshelf)
+                            vm.syncBookshelfBidirectionally(silent: true)
+                        }
+                    }
+                    .padding(16)
+                }
+            }
+
+            SettingsCardGroup(title: "账号会话与 Cookie") {
+                SettingsRow(title: "授权与登录方式", subtitle: "解锁全站搜索、榜单翻页、每日推荐与云端书架双向同步") {
+                    HStack(spacing: 8) {
+                        StudioPillButton(
+                            title: "网页登录",
+                            systemImage: "safari",
+                            variant: .primary,
+                            size: .small
+                        ) {
+                            vm.showWebLoginSheet = true
+                        }
+
+                        StudioPillButton(
+                            title: "检测有效性",
+                            systemImage: "checkmark.shield",
+                            size: .small,
+                            isLoading: vm.isTestingCookie,
+                            isDisabled: vm.isTestingCookie
+                        ) {
+                            vm.testCookieValidity()
+                        }
+
+                        StudioPillButton(
+                            title: "立即续期",
+                            systemImage: "arrow.triangle.2.circlepath",
+                            size: .small,
+                            isLoading: vm.isRefreshingCookie,
+                            isDisabled: vm.isRefreshingCookie || vm.customCookie.isEmpty
+                        ) {
+                            Task { await vm.refreshCookieKeepAlive(silent: false) }
+                        }
+
+                        if !vm.customCookie.isEmpty {
+                            StudioPillButton(title: "清空", systemImage: "trash", variant: .destructive, size: .small) {
+                                vm.clearSavedCookie()
+                            }
+                        }
+                    }
+                }
+
+                if vm.showAdvancedSettings || vm.customCookie.isEmpty {
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("手动 Cookie 字符串")
+                            .font(.callout.weight(.medium))
+                        StudioSearchField(
                             icon: "key.horizontal",
-                            placeholder: "粘贴 wenku8 Cookie（格式：jieqiUserInfo=...; PHPSESSID=...）",
+                            placeholder: "粘贴 wenku8 Cookie（包含 jieqiUserInfo=...; PHPSESSID=...）",
                             text: $vm.customCookie
                         )
 
                         let diag = vm.cookieDiagnostic
-                        HStack(alignment: .top, spacing: 8) {
+                        HStack(spacing: 6) {
                             Image(systemName: diag.isLikelyValidFormat ? "checkmark.seal.fill" : (diag.isForeignSiteCookie ? "exclamationmark.triangle.fill" : "info.circle"))
                                 .foregroundStyle(diag.isLikelyValidFormat ? .green : (diag.isForeignSiteCookie ? .orange : .secondary))
                             Text(diag.message)
@@ -43,7 +625,7 @@ struct SettingsAndAssemblyView: View {
                         }
 
                         if let verifyMsg = vm.cookieVerifyMessage {
-                            HStack(spacing: 8) {
+                            HStack(spacing: 6) {
                                 Image(systemName: (vm.cookieVerifyPassed == true) ? "checkmark.circle.fill" : "xmark.octagon.fill")
                                     .foregroundStyle((vm.cookieVerifyPassed == true) ? .green : .red)
                                 Text(verifyMsg)
@@ -51,347 +633,366 @@ struct SettingsAndAssemblyView: View {
                                     .foregroundStyle((vm.cookieVerifyPassed == true) ? .green : .red)
                             }
                         }
-
-                        if let profile = vm.userProfile, !profile.username.isEmpty {
-                            HStack(spacing: 12) {
-                                Image(systemName: "person.crop.circle.badge.checkmark")
-                                    .font(.title2)
-                                    .foregroundStyle(.green)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("\(profile.nickname.isEmpty ? profile.username : profile.nickname) (\(profile.level.isEmpty ? "会员" : profile.level))")
-                                        .font(.callout.weight(.semibold))
-                                    Text("积分 \(profile.holdingPoints.isEmpty ? "-" : profile.holdingPoints) · 经验 \(profile.experienceValue.isEmpty ? "-" : profile.experienceValue) · 每日推荐 \(profile.dailyVoteQuota.isEmpty ? "-" : profile.dailyVoteQuota) 次 · 书架上限 \(profile.bookcaseCapacity.isEmpty ? "-" : profile.bookcaseCapacity) 本")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Button("打开书架") {
-                                    vm.selectedSection = .bookshelf
-                                    vm.syncBookshelfBidirectionally(silent: true)
-                                }
-                                .buttonStyle(.glass)
-                                .controlSize(.small)
-                            }
-                            .padding(10)
-                            .glassEffect(.regular.tint(.green.opacity(0.10)), in: RoundedRectangle(cornerRadius: 10))
-                        }
-
-                        GlassEffectContainer(spacing: 10) {
-                            HStack(spacing: 10) {
-                                Button {
-                                    vm.showWebLoginSheet = true
-                                } label: {
-                                    Label("网页登录自动获取 Cookie", systemImage: "safari")
-                                }
-                                .buttonStyle(.glassProminent)
-
-                                Button {
-                                    vm.testCookieValidity()
-                                } label: {
-                                    if vm.isTestingCookie {
-                                        ProgressView().controlSize(.small)
-                                    } else {
-                                        Label("检测 Cookie 有效性", systemImage: "checkmark.shield")
-                                    }
-                                }
-                                .buttonStyle(.glass)
-                                .disabled(vm.isTestingCookie)
-
-                                Button {
-                                    Task { await vm.refreshCookieKeepAlive(silent: false) }
-                                } label: {
-                                    if vm.isRefreshingCookie {
-                                        ProgressView().controlSize(.small)
-                                    } else {
-                                        Label("立即刷新续期", systemImage: "arrow.triangle.2.circlepath")
-                                    }
-                                }
-                                .buttonStyle(.glass)
-                                .disabled(vm.isRefreshingCookie || vm.customCookie.isEmpty)
-
-                                if !vm.customCookie.isEmpty {
-                                    Button("清空") {
-                                        vm.clearSavedCookie()
-                                    }
-                                    .buttonStyle(.glass)
-                                }
-                            }
-                        }
-
-                        Divider().padding(.vertical, 2)
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            Toggle("登录后自动定时保活并动态刷新 Cookie", isOn: $vm.autoRefreshCookieEnabled)
-                                .onChange(of: vm.autoRefreshCookieEnabled) { _, _ in
-                                    vm.rescheduleCookieRefresh()
-                                }
-
-                            if vm.autoRefreshCookieEnabled {
-                                HStack(spacing: 12) {
-                                    Text("动态刷新间隔")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    Picker("刷新间隔", selection: $vm.cookieRefreshIntervalMinutes) {
-                                        Text("5 分钟").tag(5)
-                                        Text("10 分钟").tag(10)
-                                        Text("15 分钟").tag(15)
-                                        Text("30 分钟").tag(30)
-                                        Text("60 分钟").tag(60)
-                                    }
-                                    .labelsHidden()
-                                    .pickerStyle(.segmented)
-                                    .frame(maxWidth: 340)
-                                    .onChange(of: vm.cookieRefreshIntervalMinutes) { _, _ in
-                                        vm.rescheduleCookieRefresh()
-                                    }
-                                }
-                            }
-
-                            HStack(spacing: 14) {
-                                if let lastAt = vm.lastCookieRefreshAt {
-                                    Label(
-                                        "上次刷新：\(lastAt.formatted(date: .omitted, time: .shortened))",
-                                        systemImage: "clock.badge.checkmark"
-                                    )
-                                }
-                                if let nextAt = vm.nextCookieRefreshAt, vm.autoRefreshCookieEnabled {
-                                    Label(
-                                        "下次刷新：\(nextAt.formatted(date: .omitted, time: .shortened))",
-                                        systemImage: "timer"
-                                    )
-                                }
-                                if let refreshStatus = vm.lastCookieRefreshStatus, !refreshStatus.isEmpty {
-                                    Text(refreshStatus)
-                                        .lineLimit(1)
-                                }
-                            }
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        }
-
-                        Text("手动获取说明：在浏览器打开 www.wenku8.cc 并登录后，按 ⌘⌥I → Application → Cookies → https://www.wenku8.cc，复制含 jieqiUserInfo 和 PHPSESSID 的键值（勿粘贴微软/必应 MUID 等其他站点 Cookie）。")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
                     }
-                    .padding(.vertical, 4)
+                    .padding(16)
+                }
+            }
+
+            SettingsCardGroup(title: "动态刷新与保活") {
+                SettingsRow(title: "自动定时保活", subtitle: "定期轻量续期，尽可能避免 PHPSESSID 与登录态失效") {
+                    Toggle("", isOn: $vm.autoRefreshCookieEnabled)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .onChange(of: vm.autoRefreshCookieEnabled) { _, _ in
+                            vm.rescheduleCookieRefresh()
+                        }
                 }
 
-                Section("性能与输出目录") {
-                    Stepper("图片并发下载线程数：\(vm.maxConcurrency)", value: $vm.maxConcurrency, in: 1...16)
-
-                    HStack {
-                        Text("章节请求间隔：\(String(format: "%.2f", vm.politeDelaySeconds)) 秒")
-                            .monospacedDigit()
-                        Spacer()
-                        Slider(value: $vm.politeDelaySeconds, in: 0...1.5, step: 0.05)
-                            .frame(width: 240)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 4)
-                            .glassEffect(.regular, in: .capsule)
-                    }
-
-                    HStack {
-                        VStack(alignment: .leading) {
-                            Text("EPUB 下载目录")
-                            Text(vm.outputDirectoryPath)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                if vm.autoRefreshCookieEnabled {
+                    Divider()
+                    SettingsRow(title: "刷新间隔", subtitle: statusLineForCookieRefresh) {
+                        StudioSegmentedTabs(
+                            selection: $vm.cookieRefreshIntervalMinutes,
+                            items: [5, 10, 15, 30, 60],
+                            title: { "\($0) 分钟" }
+                        )
+                        .frame(width: 310)
+                        .onChange(of: vm.cookieRefreshIntervalMinutes) { _, _ in
+                            vm.rescheduleCookieRefresh()
                         }
-                        Spacer()
-                        Button("更改目录...") {
-                            vm.chooseOutputDirectory()
-                        }
-                        .buttonStyle(.glass)
                     }
                 }
+            }
+        }
+    }
 
-                Section {
-                    Picker("EPUB 规范版本", selection: $vm.assemblyConfig.epubVersion) {
+    private var statusLineForCookieRefresh: String {
+        var parts: [String] = []
+        if let lastAt = vm.lastCookieRefreshAt {
+            parts.append("上次：\(lastAt.formatted(date: .omitted, time: .shortened))")
+        }
+        if let nextAt = vm.nextCookieRefreshAt, vm.autoRefreshCookieEnabled {
+            parts.append("下次：\(nextAt.formatted(date: .omitted, time: .shortened))")
+        }
+        if let status = vm.lastCookieRefreshStatus, !status.isEmpty {
+            parts.append(status)
+        }
+        return parts.isEmpty ? "自动按周期请求站点刷新凭证" : parts.joined(separator: " · ")
+    }
+
+    // MARK: - 5. EPUB 拼装 (EPUB Assembly)
+
+    private var assemblySettingsContent: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            SettingsCardGroup(title: "格式与扉页") {
+                SettingsRow(title: "EPUB 规范版本", subtitle: "EPUB 3.0 支持更好的现代阅读器导航与样式") {
+                    Picker("", selection: $vm.assemblyConfig.epubVersion) {
                         ForEach(EPUBVersion.allCases) { ver in
                             Text(ver.rawValue).tag(ver)
                         }
                     }
-                    Picker("分卷导出策略", selection: $vm.assemblyConfig.exportMode) {
-                        ForEach(ExportMode.allCases) { mode in
-                            Text(mode.rawValue).tag(mode)
-                        }
-                    }
-                    Toggle("生成书籍简介扉页（含封面、标签、字数、完整简介）", isOn: $vm.assemblyConfig.includeInfoPage)
-                } header: {
-                    Text("EPUB 拼装 · 格式与扉页")
-                        .id("assemblySection")
+                    .labelsHidden()
+                    .frame(width: 190)
                 }
 
-                Section("EPUB 拼装 · 封面与彩插") {
-                    Toggle("包含封面页", isOn: $vm.assemblyConfig.includeCover)
-                    if vm.assemblyConfig.includeCover {
-                        Picker("封面来源", selection: $vm.assemblyConfig.coverSource) {
+                Divider()
+
+                SettingsRow(title: "分卷导出策略", subtitle: "导出为按卷独立的多个 EPUB 或合并成整本合集") {
+                    StudioSegmentedTabs(selection: $vm.assemblyConfig.exportMode, items: ExportMode.allCases)
+                        .frame(width: 240)
+                }
+
+                Divider()
+
+                SettingsRow(title: "生成书籍简介扉页", subtitle: "包含封面、标签、字数及作品简介") {
+                    Toggle("", isOn: $vm.assemblyConfig.includeInfoPage)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                }
+            }
+
+            SettingsCardGroup(title: "封面与彩插") {
+                SettingsRow(title: "包含封面页", subtitle: "将书籍封面嵌入 EPUB 首页与阅读器书架缩略图") {
+                    Toggle("", isOn: $vm.assemblyConfig.includeCover)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                }
+
+                if vm.assemblyConfig.includeCover {
+                    Divider()
+                    SettingsRow(title: "封面来源", subtitle: "默认使用官网拉取的高清封面") {
+                        Picker("", selection: $vm.assemblyConfig.coverSource) {
                             ForEach(CoverSourceMode.allCases) { src in
                                 Text(src.rawValue).tag(src)
                             }
                         }
+                        .labelsHidden()
+                        .frame(width: 210)
+                    }
 
-                        if vm.assemblyConfig.coverSource == .customLocalFile {
-                            HStack {
-                                Text(vm.assemblyConfig.customCoverPath.isEmpty ? "未选择本地封面文件" : vm.assemblyConfig.customCoverPath)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                                Spacer()
-                                Button("选择本地封面...") {
-                                    vm.chooseCustomCoverImage()
-                                }
-                                .buttonStyle(.glass)
+                    if vm.assemblyConfig.coverSource == .customLocalFile {
+                        Divider()
+                        SettingsRow(
+                            title: "本地封面图片",
+                            subtitle: vm.assemblyConfig.customCoverPath.isEmpty ? "尚未选择图片文件" : vm.assemblyConfig.customCoverPath
+                        ) {
+                            StudioPillButton(title: "选择文件...", systemImage: "photo", size: .small) {
+                                vm.chooseCustomCoverImage()
                             }
                         }
                     }
+                }
 
-                    Picker("彩插排版方式", selection: $vm.assemblyConfig.colorLayout) {
+                Divider()
+
+                SettingsRow(title: "彩插排版方式", subtitle: "设置每卷彩色插图的合并与展示逻辑") {
+                    Picker("", selection: $vm.assemblyConfig.colorLayout) {
                         ForEach(ColorLayoutMode.allCases) { mode in
                             Text(mode.rawValue).tag(mode)
                         }
                     }
+                    .labelsHidden()
+                    .frame(width: 210)
+                }
 
-                    if vm.assemblyConfig.colorLayout != .skipColor {
-                        Picker("彩插章节位置", selection: $vm.assemblyConfig.colorPlacement) {
+                if vm.assemblyConfig.colorLayout != .skipColor {
+                    Divider()
+                    SettingsRow(title: "彩插章节位置", subtitle: "将汇总彩插放置在卷首或卷末") {
+                        Picker("", selection: $vm.assemblyConfig.colorPlacement) {
                             ForEach(ColorPlacement.allCases) { pos in
                                 Text(pos.rawValue).tag(pos)
                             }
                         }
-                        Toggle("自动过滤正文中已出现过的插图（避免重复）", isOn: $vm.assemblyConfig.dedupColorImages)
+                        .labelsHidden()
+                        .frame(width: 190)
+                    }
 
-                        HStack {
-                            Text("额外追加本地彩页（\(vm.assemblyConfig.extraColorImagePaths.count) 张）")
-                            Spacer()
+                    Divider()
+                    SettingsRow(title: "自动去重插图", subtitle: "过滤已在正文中内嵌出现的重复插图") {
+                        Toggle("", isOn: $vm.assemblyConfig.dedupColorImages)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                    }
+
+                    Divider()
+                    SettingsRow(
+                        title: "额外追加本地彩页",
+                        subtitle: "当前已附加 \(vm.assemblyConfig.extraColorImagePaths.count) 张本地图片"
+                    ) {
+                        HStack(spacing: 8) {
                             if !vm.assemblyConfig.extraColorImagePaths.isEmpty {
-                                Button("清空") {
+                                StudioPillButton(title: "清空", systemImage: "trash", variant: .destructive, size: .small) {
                                     vm.assemblyConfig.extraColorImagePaths.removeAll()
                                 }
-                                .buttonStyle(.glass)
-                                .controlSize(.small)
                             }
-                            Button("添加图片...") {
+                            StudioPillButton(title: "添加图片...", systemImage: "plus", size: .small) {
                                 vm.addExtraColorImages()
                             }
-                            .buttonStyle(.glass)
                         }
+                    }
 
-                        ForEach(vm.assemblyConfig.extraColorImagePaths, id: \.self) { path in
-                            HStack {
-                                Image(systemName: "photo")
-                                    .foregroundStyle(.secondary)
-                                Text(URL(fileURLWithPath: path).lastPathComponent)
-                                    .font(.caption)
-                                Spacer()
-                                Button {
-                                    vm.assemblyConfig.extraColorImagePaths.removeAll { $0 == path }
-                                } label: {
-                                    Image(systemName: "xmark.circle")
+                    if !vm.assemblyConfig.extraColorImagePaths.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(vm.assemblyConfig.extraColorImagePaths, id: \.self) { path in
+                                HStack {
+                                    Image(systemName: "photo")
+                                        .foregroundStyle(.secondary)
+                                    Text(URL(fileURLWithPath: path).lastPathComponent)
+                                        .font(.caption)
+                                    Spacer()
+                                    StudioCircleButton(systemImage: "xmark", size: .small, accessibilityLabel: "移除图片") {
+                                        vm.assemblyConfig.extraColorImagePaths.removeAll { $0 == path }
+                                    }
                                 }
-                                .buttonStyle(.plain)
                             }
                         }
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 12)
                     }
                 }
+            }
 
-                Section("EPUB 拼装 · 正文清洗与样式") {
-                    Toggle("清理章节开头的录入组/图源/修图声明行", isOn: $vm.assemblyConfig.cleanCreditsHeader)
+            if vm.showAdvancedSettings {
+                SettingsCardGroup(title: "正文清洗与 CSS 样式") {
+                    SettingsRow(title: "清理录入组/图源/修图声明", subtitle: "自动移除章节开头的扫图与录入信息头行") {
+                        Toggle("", isOn: $vm.assemblyConfig.cleanCreditsHeader)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                    }
 
-                    HStack {
-                        Text("段首缩进：\(String(format: "%.1f", vm.assemblyConfig.textIndentEm)) em")
-                            .monospacedDigit()
-                        Spacer()
+                    Divider()
+                    SettingsRow(title: "段首缩进：\(String(format: "%.1f", vm.assemblyConfig.textIndentEm)) em", subtitle: "EPUB CSS text-indent") {
                         Slider(value: $vm.assemblyConfig.textIndentEm, in: 0...3, step: 0.5)
-                            .frame(width: 240)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 4)
-                            .glassEffect(.regular, in: .capsule)
+                            .frame(width: 200)
                     }
 
-                    HStack {
-                        Text("正文行高：\(String(format: "%.2f", vm.assemblyConfig.lineHeight))")
-                            .monospacedDigit()
-                        Spacer()
+                    Divider()
+                    SettingsRow(title: "正文行高：\(String(format: "%.2f", vm.assemblyConfig.lineHeight))", subtitle: "EPUB CSS line-height") {
                         Slider(value: $vm.assemblyConfig.lineHeight, in: 1.3...2.2, step: 0.05)
-                            .frame(width: 240)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 4)
-                            .glassEffect(.regular, in: .capsule)
+                            .frame(width: 200)
                     }
 
-                    HStack {
-                        Text("段落间距：\(String(format: "%.2f", vm.assemblyConfig.paragraphSpacingEm)) em")
-                            .monospacedDigit()
-                        Spacer()
+                    Divider()
+                    SettingsRow(title: "段落间距：\(String(format: "%.2f", vm.assemblyConfig.paragraphSpacingEm)) em", subtitle: "段落底部间距") {
                         Slider(value: $vm.assemblyConfig.paragraphSpacingEm, in: 0...1.5, step: 0.1)
-                            .frame(width: 240)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 4)
-                            .glassEffect(.regular, in: .capsule)
+                            .frame(width: 200)
                     }
                 }
 
-                Section("EPUB 拼装 · 元数据覆写与命名模板") {
-                    GlassInputField(icon: "textformat", placeholder: "自定义书名（留空使用原书名）", text: $vm.assemblyConfig.customTitleOverride)
-                    GlassInputField(icon: "person", placeholder: "自定义作者（留空使用原作者）", text: $vm.assemblyConfig.customAuthorOverride)
-                    GlassInputField(icon: "doc.badge.gearshape", placeholder: "文件名模板（{title} {volume} {index} {author} {id}）", text: $vm.assemblyConfig.filenameTemplate)
+                SettingsCardGroup(title: "元数据覆写与文件命名模板") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        StudioSearchField(icon: "textformat", placeholder: "自定义书名（留空使用原书名）", text: $vm.assemblyConfig.customTitleOverride)
+                        StudioSearchField(icon: "person", placeholder: "自定义作者（留空使用原作者）", text: $vm.assemblyConfig.customAuthorOverride)
+                        StudioSearchField(icon: "doc.badge.gearshape", placeholder: "文件名模板（{title} {volume} {index} {author} {id}）", text: $vm.assemblyConfig.filenameTemplate)
 
-                    HStack {
-                        Text("命名预览")
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text("\(previewFilename).epub")
-                            .font(.callout.monospaced())
-                            .foregroundStyle(Color.accentColor)
-                    }
-
-                    GlassEffectContainer(spacing: 10) {
                         HStack {
-                            Button("恢复默认拼装配置") {
+                            Text("命名预览")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text("\(previewFilename).epub")
+                                .font(.callout.monospaced())
+                                .foregroundStyle(studioAccent)
+                        }
+                        .padding(.top, 2)
+
+                        HStack {
+                            StudioPillButton(title: "恢复默认拼装配置", systemImage: "arrow.counterclockwise", size: .small) {
                                 vm.assemblyConfig = AssemblyConfig()
                                 vm.savePersistedState()
                             }
-                            .buttonStyle(.glass)
                             Spacer()
-                            Button("应用并保存全部设置") {
+                            StudioPillButton(title: "应用并保存拼装设置", systemImage: "checkmark.circle.fill", variant: .primary, size: .small) {
                                 Task {
                                     await vm.syncClientSettings()
                                     vm.statusBanner = "设置与拼装参数已保存"
                                 }
                             }
-                            .buttonStyle(.glassProminent)
                         }
+                        .padding(.top, 4)
                     }
+                    .padding(16)
                 }
-            }
-            .formStyle(.grouped)
-            .onChange(of: vm.scrollToAssemblyToken) { _, newToken in
-                if newToken != nil {
-                    withAnimation {
-                        proxy.scrollTo("assemblySection", anchor: .top)
-                    }
-                }
-            }
-            .onChange(of: vm.baseURL) { _, _ in
-                Task { await vm.syncClientSettings() }
-            }
-            .onChange(of: vm.maxConcurrency) { _, _ in
-                vm.savePersistedState()
-            }
-            .onChange(of: vm.assemblyConfig) { _, _ in
-                vm.savePersistedState()
             }
         }
     }
 
+    // MARK: - 6. 关于与更新 (About)
+
+    private var aboutSettingsContent: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            SettingsCardGroup(title: nil) {
+                HStack(spacing: 16) {
+                    appIconView(size: 62)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Wenku8 Studio")
+                            .font(.title3.weight(.bold))
+                        Text("版本 \(vm.appVersionDisplay) (\(vm.buildNumberDisplay))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("为 macOS 打造的轻小说文库阅读器与 EPUB 电子书制作工具")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+                }
+                .padding(16)
+
+                Divider()
+
+                SettingsRow(title: "GitHub 仓库", subtitle: "github.com/generalio/lightnovel-download") {
+                    StudioPillButton(title: "在浏览器中打开", systemImage: "safari", size: .small) {
+                        if let url = URL(string: "https://github.com/generalio/lightnovel-download") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                }
+            }
+
+            SettingsCardGroup(title: "更新") {
+                SettingsRow(
+                    title: "检查更新",
+                    subtitle: vm.updateCheckStatus ?? "当前版本 \(vm.appVersionDisplay) (\(vm.buildNumberDisplay))"
+                ) {
+                    HStack(spacing: 8) {
+                        if let releaseURL = vm.latestReleaseURL,
+                           let tag = vm.latestReleaseTag,
+                           (vm.updateCheckStatus ?? "").contains("发现新版本") {
+                            StudioPillButton(title: "下载 \(tag)", systemImage: "arrow.down.circle.fill", variant: .primary, size: .small) {
+                                if let url = URL(string: releaseURL) {
+                                    NSWorkspace.shared.open(url)
+                                }
+                            }
+                        }
+                        StudioPillButton(
+                            title: "检查更新",
+                            systemImage: "arrow.clockwise",
+                            size: .small,
+                            isLoading: vm.isCheckingUpdates,
+                            isDisabled: vm.isCheckingUpdates
+                        ) {
+                            Task { await vm.checkForAppUpdates(silent: false) }
+                        }
+                    }
+                }
+
+                Divider()
+
+                SettingsRow(title: "自动检查更新", subtitle: "启动应用时自动对比 GitHub Releases 最新版本") {
+                    Toggle("", isOn: $vm.autoCheckUpdatesOnLaunch)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .onChange(of: vm.autoCheckUpdatesOnLaunch) { _, _ in
+                            vm.savePersistedState()
+                        }
+                }
+            }
+
+            SettingsCardGroup(title: "重置") {
+                SettingsRow(
+                    title: "恢复默认设置",
+                    subtitle: "所有常规、外观主题、阅读器及 EPUB 拼装参数回到初始状态，不影响账号 Cookie 与书架记录"
+                ) {
+                    StudioPillButton(title: "恢复默认", systemImage: "arrow.counterclockwise", variant: .destructive, size: .small) {
+                        vm.resetPreferencesToDefaults()
+                    }
+                }
+            }
+        }
+    }
+
+    private func appIconView(size: CGFloat) -> some View {
+        Group {
+            if let nsImg = NSImage(named: "AppIcon") ?? NSApp.applicationIconImage {
+                Image(nsImage: nsImg)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: size, height: size)
+                    .clipShape(RoundedRectangle(cornerRadius: size * 0.225, style: .continuous))
+            } else {
+                RoundedRectangle(cornerRadius: size * 0.225, style: .continuous)
+                    .fill(studioAccent.gradient)
+                    .frame(width: size, height: size)
+                    .overlay {
+                        Image(systemName: "books.vertical.fill")
+                            .font(.system(size: size * 0.44, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
+            }
+        }
+        .shadow(color: StudioTokens.cardShadowColor, radius: 6, y: 2)
+    }
+
     private var previewFilename: String {
         let title = vm.assemblyConfig.customTitleOverride.isEmpty
-            ? (vm.bookDetail?.title ?? "关于我帮助迷路小女孩后...")
+            ? (vm.bookDetail?.title ?? "轻小说示例")
             : vm.assemblyConfig.customTitleOverride
         let author = vm.assemblyConfig.customAuthorOverride.isEmpty
-            ? (vm.bookDetail?.author ?? "猫玄")
+            ? (vm.bookDetail?.author ?? "作者名")
             : vm.assemblyConfig.customAuthorOverride
-        let bookId = vm.bookDetail?.bookId ?? "3115"
+        let bookId = vm.bookDetail?.bookId ?? "0000"
         return builder.renderFilename(
             template: vm.assemblyConfig.filenameTemplate,
             title: title,
@@ -400,5 +1001,104 @@ struct SettingsAndAssemblyView: View {
             author: author,
             bookId: bookId
         )
+    }
+}
+
+// MARK: - Settings Layout Helpers
+
+private struct SettingsCategorySidebarRow: View {
+    let category: SettingsCategory
+    let isSelected: Bool
+    let action: () -> Void
+
+    @Environment(\.studioAccentColor) private var studioAccent
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: category.icon)
+                    .symbolRenderingMode(.monochrome)
+                    .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
+                    .foregroundStyle(isSelected ? studioAccent : Color.secondary)
+                    .frame(width: 18, height: 18)
+
+                Text(category.rawValue)
+                    .font(.callout.weight(isSelected ? .semibold : .regular))
+                    .foregroundStyle(isSelected ? Color.primary : Color.primary.opacity(0.85))
+                    .lineLimit(1)
+
+                Spacer()
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background {
+                RoundedRectangle(cornerRadius: StudioTokens.sidebarRowRadius, style: .continuous)
+                    .fill(
+                        isSelected
+                            ? studioAccent.opacity(0.14)
+                            : (isHovered ? Color.primary.opacity(0.05) : Color.clear)
+                    )
+            }
+            .overlay {
+                if isSelected {
+                    RoundedRectangle(cornerRadius: StudioTokens.sidebarRowRadius, style: .continuous)
+                        .strokeBorder(studioAccent.opacity(0.22), lineWidth: 0.8)
+                }
+            }
+            .contentShape(RoundedRectangle(cornerRadius: StudioTokens.sidebarRowRadius, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovered = hovering
+        }
+    }
+}
+
+private struct SettingsCardGroup<Content: View>: View {
+    let title: String?
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let title, !title.isEmpty {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 4)
+            }
+
+            VStack(alignment: .leading, spacing: 0) {
+                content
+            }
+            .studioCard(cornerRadius: StudioTokens.cardRadius, padding: 0)
+        }
+    }
+}
+
+private struct SettingsRow<Control: View>: View {
+    let title: String
+    var subtitle: String? = nil
+    @ViewBuilder let control: Control
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 16) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.callout.weight(.medium))
+                if let subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+
+            Spacer(minLength: 12)
+
+            control
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
     }
 }

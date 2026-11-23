@@ -351,8 +351,11 @@ struct ReaderPreviewView: View {
 
                                         Image(systemName: "arrow.up.left.and.arrow.down.right")
                                             .font(.caption.weight(.semibold))
+                                            .foregroundStyle(.primary)
                                             .padding(7)
-                                            .glassEffect(.regular, in: .circle)
+                                            .background(.regularMaterial, in: Circle())
+                                            .overlay(Circle().strokeBorder(StudioTokens.hairlineStroke, lineWidth: 1))
+                                            .shadow(color: StudioTokens.cardShadowColor, radius: 4, y: 2)
                                             .padding(10)
                                     }
                                     .frame(maxWidth: .infinity, alignment: .center)
@@ -419,44 +422,43 @@ struct ReaderPreviewView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 5)
-        .glassEffect(.regular, in: .capsule)
+        .background(.regularMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(StudioTokens.hairlineStroke, lineWidth: 1))
+        .shadow(color: StudioTokens.cardShadowColor, radius: 6, y: 2)
         .padding(.bottom, 6)
-        .opacity(0.92)
+        .opacity(0.94)
     }
 
     private func focusModeFloatingBar(content: ChapterContent) -> some View {
         HStack(spacing: 10) {
-            Button {
+            StudioCircleButton(systemImage: "chevron.left", size: .small, accessibilityLabel: "上一页") {
                 turnBackward()
-            } label: {
-                Image(systemName: "chevron.left")
             }
-            .buttonStyle(.glass)
 
             Text("\(content.chapter.title) · \(currentPageIndex + 1)/\(max(1, paginatedPages.count))")
                 .font(.caption)
                 .lineLimit(1)
 
-            Button {
+            StudioCircleButton(systemImage: "chevron.right", size: .small, accessibilityLabel: "下一页") {
                 turnForward()
-            } label: {
-                Image(systemName: "chevron.right")
             }
-            .buttonStyle(.glass)
 
-            Button {
+            StudioPillButton(
+                title: "退出沉浸",
+                systemImage: "arrow.down.right.and.arrow.up.left",
+                variant: .primary,
+                size: .small
+            ) {
                 withAnimation(.easeInOut(duration: 0.18)) {
                     vm.isFocusReadingMode = false
                 }
-            } label: {
-                Label("退出沉浸", systemImage: "arrow.down.right.and.arrow.up.left")
             }
-            .buttonStyle(.glassProminent)
-            .controlSize(.small)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .glassEffect(.regular, in: .capsule)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(.regularMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(StudioTokens.hairlineStroke, lineWidth: 1))
+        .shadow(color: StudioTokens.floatingShadowColor, radius: 12, y: 4)
         .padding(.bottom, 14)
     }
 
@@ -472,25 +474,20 @@ struct ReaderPreviewView: View {
             Text("支持仿真拖拽翻页、双页对开、系统默认/自定义字体、简繁切换、书签与语音朗读。")
                 .foregroundStyle(.secondary)
 
-            GlassEffectContainer(spacing: 10) {
-                HStack(spacing: 10) {
-                    if vm.bookDetail != nil {
-                        Button("开始 / 继续阅读") {
-                            vm.openLastReadOrFirstChapter()
-                        }
-                        .buttonStyle(.glassProminent)
+            HStack(spacing: 10) {
+                if vm.bookDetail != nil {
+                    StudioPillButton(title: "开始 / 继续阅读", systemImage: "book.fill", variant: .primary) {
+                        vm.openLastReadOrFirstChapter()
+                    }
 
-                        Button("展开章节目录") {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                showTOCSidebar = true
-                            }
+                    StudioPillButton(title: "展开章节目录", systemImage: "sidebar.left") {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            showTOCSidebar = true
                         }
-                        .buttonStyle(.glass)
-                    } else {
-                        Button("前往目录与选章") {
-                            vm.selectedSection = .catalog
-                        }
-                        .buttonStyle(.glassProminent)
+                    }
+                } else {
+                    StudioPillButton(title: "前往目录与选章", systemImage: "list.bullet.rectangle", variant: .primary) {
+                        vm.navigateToSection(.catalog)
                     }
                 }
             }
@@ -502,124 +499,118 @@ struct ReaderPreviewView: View {
     // MARK: - Toolbar
 
     private var readerToolbar: some View {
-        GlassEffectContainer(spacing: 8) {
-            HStack(spacing: 8) {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.18)) {
-                        showTOCSidebar.toggle()
-                    }
-                } label: {
-                    Label("目录", systemImage: "sidebar.left")
+        HStack(spacing: 10) {
+            StudioPillButton(title: "目录", systemImage: "sidebar.left", size: .small) {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    showTOCSidebar.toggle()
                 }
-                .buttonStyle(.glass)
-
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(vm.previewChapter?.chapter.title ?? (vm.bookDetail?.title ?? "章节阅读器"))
-                        .font(.headline)
-                        .lineLimit(1)
-                    if let prog = vm.readerProgressInfo() {
-                        if vm.readerPageMode != .scroll && !paginatedPages.isEmpty {
-                            Text("第 \(prog.current)/\(prog.total) 章 · 第 \(currentPageIndex + 1)/\(paginatedPages.count) 页")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Text("第 \(prog.current) / \(prog.total) 章")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-
-                Spacer()
-
-                // Page turn mode segmented control (仿真翻页 / 平移翻页 / 上下滚动)
-                GlassSegmentedControl(selection: $vm.readerPageMode, items: ReaderPageMode.allCases)
-                    .frame(width: 214)
-
-                // TTS Speech button
-                Button {
-                    vm.toggleSpeechForCurrentChapter()
-                } label: {
-                    Image(systemName: vm.isSpeakingChapter ? "stop.circle.fill" : "speaker.wave.2")
-                        .foregroundStyle(vm.isSpeakingChapter ? Color.accentColor : Color.primary)
-                }
-                .buttonStyle(.glass)
-                .disabled(vm.previewChapter == nil)
-                .help(vm.isSpeakingChapter ? "停止语音朗读" : "开始本地语音听书")
-
-                // Bookmark current page button
-                if let chap = vm.previewChapter?.chapter {
-                    let curPage = paginatedPages.indices.contains(currentPageIndex) ? paginatedPages[currentPageIndex] : nil
-                    let isMarked = vm.isReaderPageBookmarked(chapterId: chap.id, pageIndex: curPage?.id ?? 0)
-                    Button {
-                        vm.toggleReaderBookmark(
-                            chapter: chap,
-                            pageIndex: curPage?.id ?? 0,
-                            progressRatio: curPage?.progressRatio ?? 0,
-                            excerpt: curPage?.excerpt ?? chap.title
-                        )
-                    } label: {
-                        Image(systemName: isMarked ? "bookmark.fill" : "bookmark")
-                            .foregroundStyle(isMarked ? Color.accentColor : Color.primary)
-                    }
-                    .buttonStyle(.glass)
-                    .help("添加/移除页内书签")
-                }
-
-                // Compact color-swatch theme selector
-                HStack(spacing: 6) {
-                    ForEach(ReaderTheme.allCases) { theme in
-                        Button {
-                            vm.readerTheme = theme
-                        } label: {
-                            Circle()
-                                .fill(theme.swatchColor)
-                                .frame(width: 17, height: 17)
-                                .overlay {
-                                    Circle()
-                                        .strokeBorder(
-                                            vm.readerTheme == theme ? Color.accentColor : Color.secondary.opacity(0.4),
-                                            lineWidth: vm.readerTheme == theme ? 2.5 : 1
-                                        )
-                                }
-                        }
-                        .buttonStyle(.plain)
-                        .help(theme.rawValue)
-                    }
-                }
-                .padding(.horizontal, 9)
-                .padding(.vertical, 5)
-                .glassEffect(.regular, in: .capsule)
-
-                Button {
-                    showTypographyPopover.toggle()
-                } label: {
-                    Label("Aa", systemImage: "textformat")
-                }
-                .buttonStyle(.glass)
-                .popover(isPresented: $showTypographyPopover, arrowEdge: .bottom) {
-                    typographySettingsPopover
-                }
-
-                Button {
-                    withAnimation(.easeInOut(duration: 0.18)) {
-                        vm.isFocusReadingMode = true
-                    }
-                } label: {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                }
-                .buttonStyle(.glass)
-                .disabled(vm.previewChapter == nil)
-                .help("沉浸专注阅读（隐藏工具栏，点击页面或 Esc 恢复）")
-
-                chapterNavigationButtons
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(vm.previewChapter?.chapter.title ?? (vm.bookDetail?.title ?? "章节阅读器"))
+                    .font(.headline)
+                    .lineLimit(1)
+                if let prog = vm.readerProgressInfo() {
+                    if vm.readerPageMode != .scroll && !paginatedPages.isEmpty {
+                        Text("第 \(prog.current)/\(prog.total) 章 · 第 \(currentPageIndex + 1)/\(paginatedPages.count) 页")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("第 \(prog.current) / \(prog.total) 章")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            Spacer()
+
+            // Page turn mode segmented control (仿真翻页 / 平移翻页 / 上下滚动)
+            StudioSegmentedTabs(selection: $vm.readerPageMode, items: ReaderPageMode.allCases)
+                .frame(width: 224)
+
+            // TTS Speech button
+            StudioCircleButton(
+                systemImage: vm.isSpeakingChapter ? "stop.circle.fill" : "speaker.wave.2",
+                variant: vm.isSpeakingChapter ? .primary : .secondary,
+                size: .small,
+                isDisabled: vm.previewChapter == nil,
+                accessibilityLabel: vm.isSpeakingChapter ? "停止语音朗读" : "开始本地语音听书"
+            ) {
+                vm.toggleSpeechForCurrentChapter()
+            }
+            .help(vm.isSpeakingChapter ? "停止语音朗读" : "开始本地语音听书")
+
+            // Bookmark current page button
+            if let chap = vm.previewChapter?.chapter {
+                let curPage = paginatedPages.indices.contains(currentPageIndex) ? paginatedPages[currentPageIndex] : nil
+                let isMarked = vm.isReaderPageBookmarked(chapterId: chap.id, pageIndex: curPage?.id ?? 0)
+                StudioCircleButton(
+                    systemImage: isMarked ? "bookmark.fill" : "bookmark",
+                    variant: isMarked ? .primary : .secondary,
+                    size: .small,
+                    accessibilityLabel: "添加/移除页内书签"
+                ) {
+                    vm.toggleReaderBookmark(
+                        chapter: chap,
+                        pageIndex: curPage?.id ?? 0,
+                        progressRatio: curPage?.progressRatio ?? 0,
+                        excerpt: curPage?.excerpt ?? chap.title
+                    )
+                }
+                .help("添加/移除页内书签")
+            }
+
+            // Compact color-swatch theme selector
+            HStack(spacing: 6) {
+                ForEach(ReaderTheme.allCases) { theme in
+                    Button {
+                        vm.readerTheme = theme
+                    } label: {
+                        Circle()
+                            .fill(theme.swatchColor)
+                            .frame(width: 17, height: 17)
+                            .overlay {
+                                Circle()
+                                    .strokeBorder(
+                                        vm.readerTheme == theme ? Color.accentColor : Color.secondary.opacity(0.4),
+                                        lineWidth: vm.readerTheme == theme ? 2.5 : 1
+                                    )
+                            }
+                    }
+                    .buttonStyle(.plain)
+                    .help(theme.rawValue)
+                }
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(StudioTokens.controlBackground, in: Capsule())
+            .overlay(Capsule().strokeBorder(StudioTokens.hairlineStroke, lineWidth: 1))
+
+            StudioPillButton(title: "Aa", systemImage: "textformat", size: .small) {
+                showTypographyPopover.toggle()
+            }
+            .popover(isPresented: $showTypographyPopover, arrowEdge: .bottom) {
+                typographySettingsPopover
+            }
+
+            StudioCircleButton(
+                systemImage: "arrow.up.left.and.arrow.down.right",
+                size: .small,
+                isDisabled: vm.previewChapter == nil,
+                accessibilityLabel: "沉浸专注阅读"
+            ) {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    vm.isFocusReadingMode = true
+                }
+            }
+            .help("沉浸专注阅读（隐藏工具栏，点击页面或 Esc 恢复）")
+
+            chapterNavigationButtons
         }
+        .studioCard(cornerRadius: StudioTokens.cardRadius, padding: 10)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
     }
 
     // MARK: - Typography & Simulation Settings Popover
@@ -756,27 +747,29 @@ struct ReaderPreviewView: View {
     }
 
     private var chapterNavigationButtons: some View {
-        HStack(spacing: 4) {
-            Button {
+        HStack(spacing: 6) {
+            StudioCircleButton(
+                systemImage: "chevron.left",
+                size: .small,
+                isDisabled: vm.adjacentChapter(offset: -1) == nil,
+                accessibilityLabel: "上一章"
+            ) {
                 if let prev = vm.adjacentChapter(offset: -1) {
                     vm.openChapterInReader(prev)
                 }
-            } label: {
-                Image(systemName: "chevron.left")
             }
-            .buttonStyle(.glass)
-            .disabled(vm.adjacentChapter(offset: -1) == nil)
             .help("上一章")
 
-            Button {
+            StudioCircleButton(
+                systemImage: "chevron.right",
+                size: .small,
+                isDisabled: vm.adjacentChapter(offset: 1) == nil,
+                accessibilityLabel: "下一章"
+            ) {
                 if let next = vm.adjacentChapter(offset: 1) {
                     vm.openChapterInReader(next)
                 }
-            } label: {
-                Image(systemName: "chevron.right")
             }
-            .buttonStyle(.glass)
-            .disabled(vm.adjacentChapter(offset: 1) == nil)
             .help("下一章")
         }
     }
@@ -785,15 +778,9 @@ struct ReaderPreviewView: View {
 
     private var leftSidebarDrawer: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Picker("", selection: $sidebarTab) {
-                ForEach(ReaderSidebarTab.allCases) { tab in
-                    Text(tab.rawValue).tag(tab)
-                }
-            }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-            .padding(10)
-            .background(.bar)
+            StudioSegmentedTabs(selection: $sidebarTab, items: ReaderSidebarTab.allCases)
+                .padding(10)
+                .background(.bar)
 
             Divider()
 
@@ -909,7 +896,7 @@ struct ReaderPreviewView: View {
 
     private var chapterSearchList: some View {
         VStack(spacing: 8) {
-            GlassInputField(
+            StudioSearchField(
                 icon: "magnifyingglass",
                 placeholder: "在本章正文中查找关键词...",
                 text: $searchInChapterQuery,
@@ -984,11 +971,41 @@ private struct ReaderImageLightboxView: View {
         return imagesMap[imageURLs[safeIndex]]
     }
 
-    var body: some View {
-        ZStack {
-            Color.black.opacity(0.92).ignoresSafeArea()
+    private var fittedModalSize: CGSize {
+        guard let size = currentImage?.size, size.width > 0, size.height > 0 else {
+            return CGSize(width: 780, height: 560)
+        }
+        let maxW: CGFloat = 980
+        let maxH: CGFloat = 760
+        let minW: CGFloat = 460
+        let minH: CGFloat = 380
+        let aspect = size.width / size.height
+        var w = min(maxW, max(minW, size.width))
+        var h = w / aspect
+        if h > maxH {
+            h = maxH
+            w = h * aspect
+        }
+        if h < minH {
+            h = minH
+            w = min(maxW, h * aspect)
+        }
+        return CGSize(width: max(minW, w), height: max(minH, h))
+    }
 
+    var body: some View {
+        let modalSize = fittedModalSize
+        ZStack {
+            // Soft ambient backdrop derived from the image itself (eliminates black borders)
             if let img = currentImage {
+                Image(nsImage: img)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: modalSize.width, height: modalSize.height)
+                    .blur(radius: 36)
+                    .overlay(.regularMaterial.opacity(0.65))
+                    .clipped()
+
                 Image(nsImage: img)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
@@ -1017,100 +1034,98 @@ private struct ReaderImageLightboxView: View {
                             }
                         }
                     }
-                    .padding(24)
             } else {
+                Rectangle()
+                    .fill(.regularMaterial)
                 ProgressView()
-                    .tint(.white)
             }
 
             VStack {
                 HStack {
                     Text("插图预览 \(safeIndex + 1) / \(imageURLs.count)")
                         .font(.callout.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
-                        .glassEffect(.regular, in: .capsule)
+                        .background(.regularMaterial, in: Capsule())
+                        .overlay(Capsule().strokeBorder(StudioTokens.hairlineStroke, lineWidth: 1))
+                        .shadow(color: StudioTokens.cardShadowColor, radius: 6, y: 2)
 
                     Spacer()
 
-                    GlassEffectContainer(spacing: 8) {
-                        HStack(spacing: 8) {
-                            Button {
-                                withAnimation { scale = max(1.0, scale - 0.5) }
-                                if scale <= 1.01 {
-                                    offset = .zero
-                                    dragStartOffset = .zero
-                                }
-                            } label: {
-                                Image(systemName: "minus.magnifyingglass")
+                    HStack(spacing: 8) {
+                        StudioCircleButton(
+                            systemImage: "minus.magnifyingglass",
+                            size: .small,
+                            isDisabled: scale <= 1.0,
+                            accessibilityLabel: "缩小"
+                        ) {
+                            withAnimation { scale = max(1.0, scale - 0.5) }
+                            if scale <= 1.01 {
+                                offset = .zero
+                                dragStartOffset = .zero
                             }
-                            .buttonStyle(.glass)
-                            .disabled(scale <= 1.0)
-
-                            Button("\(Int(scale * 100))%") {
-                                withAnimation {
-                                    scale = 1.0
-                                    offset = .zero
-                                    dragStartOffset = .zero
-                                }
-                            }
-                            .buttonStyle(.glass)
-
-                            Button {
-                                withAnimation { scale = min(4.0, scale + 0.5) }
-                            } label: {
-                                Image(systemName: "plus.magnifyingglass")
-                            }
-                            .buttonStyle(.glass)
-                            .disabled(scale >= 4.0)
-
-                            if let img = currentImage {
-                                Button {
-                                    saveImageToDisk(img)
-                                } label: {
-                                    Label("保存", systemImage: "square.and.arrow.down")
-                                }
-                                .buttonStyle(.glass)
-                            }
-
-                            Button("关闭", action: onClose)
-                                .buttonStyle(.glassProminent)
-                                .keyboardShortcut(.escape, modifiers: [])
                         }
+
+                        StudioPillButton(title: "\(Int(scale * 100))%", size: .small) {
+                            withAnimation {
+                                scale = 1.0
+                                offset = .zero
+                                dragStartOffset = .zero
+                            }
+                        }
+
+                        StudioCircleButton(
+                            systemImage: "plus.magnifyingglass",
+                            size: .small,
+                            isDisabled: scale >= 4.0,
+                            accessibilityLabel: "放大"
+                        ) {
+                            withAnimation { scale = min(4.0, scale + 0.5) }
+                        }
+
+                        if let img = currentImage {
+                            StudioPillButton(title: "保存", systemImage: "square.and.arrow.down", size: .small) {
+                                saveImageToDisk(img)
+                            }
+                        }
+
+                        StudioPillButton(title: "关闭", variant: .primary, size: .small, action: onClose)
+                            .keyboardShortcut(.escape, modifiers: [])
                     }
                 }
-                .padding(16)
+                .padding(14)
 
                 Spacer()
 
                 if imageURLs.count > 1 {
-                    GlassEffectContainer(spacing: 12) {
-                        HStack(spacing: 14) {
-                            Button {
-                                switchTo(safeIndex - 1)
-                            } label: {
-                                Label("上一张", systemImage: "chevron.left")
-                            }
-                            .buttonStyle(.glass)
-                            .keyboardShortcut(.leftArrow, modifiers: [])
-                            .disabled(safeIndex <= 0)
-
-                            Button {
-                                switchTo(safeIndex + 1)
-                            } label: {
-                                Label("下一张", systemImage: "chevron.right")
-                            }
-                            .buttonStyle(.glass)
-                            .keyboardShortcut(.rightArrow, modifiers: [])
-                            .disabled(safeIndex >= imageURLs.count - 1)
+                    HStack(spacing: 14) {
+                        StudioPillButton(
+                            title: "上一张",
+                            systemImage: "chevron.left",
+                            size: .small,
+                            isDisabled: safeIndex <= 0
+                        ) {
+                            switchTo(safeIndex - 1)
                         }
-                        .padding(12)
+                        .keyboardShortcut(.leftArrow, modifiers: [])
+
+                        StudioPillButton(
+                            title: "下一张",
+                            systemImage: "chevron.right",
+                            size: .small,
+                            isDisabled: safeIndex >= imageURLs.count - 1
+                        ) {
+                            switchTo(safeIndex + 1)
+                        }
+                        .keyboardShortcut(.rightArrow, modifiers: [])
                     }
+                    .padding(14)
                 }
             }
         }
-        .frame(minWidth: 860, minHeight: 620)
+        .frame(width: modalSize.width, height: modalSize.height)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private func switchTo(_ idx: Int) {

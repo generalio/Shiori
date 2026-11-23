@@ -47,83 +47,62 @@ struct DiscoveryView: View {
                 }
                 .padding(20)
             }
+            .scrollEdgeEffectHidden(true, for: .all)
         }
         .onAppear {
-            if vm.discoveryBooks.isEmpty && vm.activeDiscoverySort.isEmpty && !vm.isLoadingDiscovery {
-                vm.loadDiscoveryList(title: "总点击榜", path: "/modules/article/toplist.php?sort=allvisit")
+            if vm.discoveryBooks.isEmpty && vm.activeDiscoverySort.isEmpty && !vm.isLoadingDiscovery,
+               let path = vm.defaultDiscoveryChannel.path {
+                vm.loadDiscoveryList(title: vm.defaultDiscoveryChannel.rawValue, path: path)
             }
         }
     }
 
     private var discoveryHeader: some View {
         VStack(alignment: .leading, spacing: 12) {
-            GlassEffectContainer(spacing: 10) {
-                HStack(spacing: 10) {
-                    GlassInputField(
-                        icon: "magnifyingglass",
-                        placeholder: "搜索轻小说书名、作者名或输入书号...",
-                        text: $vm.searchQuery,
-                        onSubmit: { vm.performDiscoverySearch() }
-                    )
+            HStack(spacing: 10) {
+                StudioSearchField(
+                    icon: "magnifyingglass",
+                    placeholder: "搜索轻小说书名、作者名或输入书号...",
+                    text: $vm.searchQuery,
+                    onSubmit: { vm.performDiscoverySearch() }
+                )
 
-                    GlassSegmentedControl(selection: $vm.searchScope, items: SearchScope.allCases)
-                        .frame(width: 218)
+                StudioSegmentedTabs(selection: $vm.searchScope, items: SearchScope.allCases)
+                    .frame(width: 224)
 
-                    Button {
-                        vm.performDiscoverySearch()
-                    } label: {
-                        if vm.isLoadingDiscovery {
-                            ProgressView().controlSize(.small)
-                                .padding(.horizontal, 10)
-                        } else {
-                            Text("搜索")
-                                .padding(.horizontal, 10)
-                        }
-                    }
-                    .buttonStyle(.glassProminent)
-                    .disabled(vm.isLoadingDiscovery || vm.searchQuery.trimmingCharacters(in: .whitespaces).isEmpty)
+                StudioPillButton(
+                    title: "搜索",
+                    systemImage: "magnifyingglass",
+                    variant: .primary,
+                    isLoading: vm.isLoadingDiscovery,
+                    isDisabled: vm.isLoadingDiscovery || vm.searchQuery.trimmingCharacters(in: .whitespaces).isEmpty
+                ) {
+                    vm.performDiscoverySearch()
                 }
             }
 
             ScrollView(.horizontal, showsIndicators: false) {
-                GlassEffectContainer(spacing: 8) {
-                    HStack(spacing: 8) {
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.18)) {
-                                vm.showTagBrowser.toggle()
-                            }
-                            if vm.showTagBrowser && vm.tagGroups.isEmpty {
-                                vm.loadTagGroups()
-                            }
-                        } label: {
-                            Label("Tags 标签云", systemImage: "tag.fill")
-                                .font(.callout)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
+                HStack(spacing: 8) {
+                    StudioFilterChip(
+                        title: "Tags 标签云",
+                        systemImage: "tag.fill",
+                        isSelected: vm.showTagBrowser || vm.selectedTag != nil
+                    ) {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            vm.showTagBrowser.toggle()
                         }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(vm.showTagBrowser || vm.selectedTag != nil ? Color.accentColor : Color.primary)
-                        .glassEffect(
-                            (vm.showTagBrowser || vm.selectedTag != nil) ? .regular.tint(.accentColor.opacity(0.22)).interactive() : .regular.interactive(),
-                            in: .capsule
-                        )
+                        if vm.showTagBrowser && vm.tagGroups.isEmpty {
+                            vm.loadTagGroups()
+                        }
+                    }
 
-                        ForEach(quickChannels, id: \.path) { channel in
-                            let isActive = vm.activeDiscoverySort == channel.path
-                            Button {
-                                vm.loadDiscoveryList(title: channel.title, path: channel.path)
-                            } label: {
-                                Label(channel.title, systemImage: channel.icon)
-                                    .font(.callout)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 6)
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(isActive ? Color.accentColor : Color.primary)
-                            .glassEffect(
-                                isActive ? .regular.tint(.accentColor.opacity(0.22)).interactive() : .regular.interactive(),
-                                in: .capsule
-                            )
+                    ForEach(quickChannels, id: \.path) { channel in
+                        StudioFilterChip(
+                            title: channel.title,
+                            systemImage: channel.icon,
+                            isSelected: vm.activeDiscoverySort == channel.path
+                        ) {
+                            vm.loadDiscoveryList(title: channel.title, path: channel.path)
                         }
                     }
                 }
@@ -148,18 +127,15 @@ struct DiscoveryView: View {
             }
             Spacer()
             if vm.discoveryRequiresCookie {
-                Button("前往设置登录") {
-                    vm.selectedSection = .settings
+                StudioPillButton(title: "前往设置登录", systemImage: "gearshape", variant: .primary, size: .small) {
+                    vm.navigateToSettingsCategory(.account)
                 }
-                .buttonStyle(.glassProminent)
-                Button("网页登录") {
+                StudioPillButton(title: "网页登录", systemImage: "safari", size: .small) {
                     vm.showWebLoginSheet = true
                 }
-                .buttonStyle(.glass)
             }
         }
-        .padding(14)
-        .glassEffect(.regular.tint(.orange.opacity(0.12)), in: RoundedRectangle(cornerRadius: 14))
+        .studioCard(cornerRadius: StudioTokens.cardRadius, padding: 14, tint: vm.discoveryRequiresCookie ? .orange : .blue)
     }
 
     private func sectionHeader(_ title: String, count: Int) -> some View {
@@ -183,25 +159,27 @@ struct DiscoveryView: View {
     private var paginationBar: some View {
         HStack(spacing: 12) {
             Spacer()
-            Button {
+            StudioPillButton(
+                title: "上一页",
+                systemImage: "chevron.left",
+                size: .small,
+                isDisabled: vm.discoveryPage <= 1 || vm.isLoadingDiscovery
+            ) {
                 vm.loadDiscoveryPage(vm.discoveryPage - 1)
-            } label: {
-                Label("上一页", systemImage: "chevron.left")
             }
-            .buttonStyle(.glass)
-            .disabled(vm.discoveryPage <= 1 || vm.isLoadingDiscovery)
 
             Text("第 \(vm.discoveryPage) / \(vm.discoveryTotalPages) 页")
                 .font(.callout.monospacedDigit())
                 .foregroundStyle(.secondary)
 
-            Button {
+            StudioPillButton(
+                title: "下一页",
+                systemImage: "chevron.right",
+                size: .small,
+                isDisabled: vm.discoveryPage >= vm.discoveryTotalPages || vm.isLoadingDiscovery
+            ) {
                 vm.loadDiscoveryPage(vm.discoveryPage + 1)
-            } label: {
-                Label("下一页", systemImage: "chevron.right")
             }
-            .buttonStyle(.glass)
-            .disabled(vm.discoveryPage >= vm.discoveryTotalPages || vm.isLoadingDiscovery)
             Spacer()
         }
         .padding(.top, 6)
@@ -213,25 +191,18 @@ struct DiscoveryView: View {
                 Label("官方 Tags 云集", systemImage: "tag.circle.fill")
                     .font(.headline)
                 Spacer()
-                Picker("排序", selection: $vm.tagSortOption) {
-                    ForEach(TagSortOption.allCases) { opt in
-                        Text(opt.displayName).tag(opt)
+                StudioSegmentedTabs(selection: $vm.tagSortOption, items: TagSortOption.allCases) { $0.displayName }
+                    .frame(maxWidth: 320)
+                    .onChange(of: vm.tagSortOption) { _, newSort in
+                        if let tag = vm.selectedTag {
+                            vm.loadBooksByTag(tag, sort: newSort, page: 1)
+                        }
                     }
-                }
-                .labelsHidden()
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 320)
-                .onChange(of: vm.tagSortOption) { _, newSort in
-                    if let tag = vm.selectedTag {
-                        vm.loadBooksByTag(tag, sort: newSort, page: 1)
-                    }
-                }
 
-                Button("刷新") {
+                StudioCircleButton(systemImage: "arrow.clockwise", size: .small, accessibilityLabel: "刷新标签云") {
                     vm.loadTagGroups()
                 }
-                .buttonStyle(.glass)
-                .controlSize(.small)
+                .help("刷新标签云")
             }
 
             if vm.isLoadingTags {
@@ -317,15 +288,13 @@ struct DiscoveryView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 460)
             HStack(spacing: 10) {
-                Button("搜索作者「猫玄」") {
+                StudioPillButton(title: "浏览总点击榜", systemImage: "flame.fill", variant: .primary) {
+                    vm.loadDiscoveryList(title: "总点击榜", path: "/modules/article/toplist.php?sort=allvisit")
+                }
+
+                StudioPillButton(title: "搜索作者「猫玄」", systemImage: "person.fill") {
                     vm.loadAuthorWorks(author: "猫玄")
                 }
-                .buttonStyle(.glassProminent)
-
-                Button("查看书号 3115") {
-                    vm.loadBook(inputOverride: "3115")
-                }
-                .buttonStyle(.glass)
             }
         }
         .frame(maxWidth: .infinity)

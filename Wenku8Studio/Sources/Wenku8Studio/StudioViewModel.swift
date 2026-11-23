@@ -5,7 +5,7 @@ import SwiftUI
 import WebKit
 import Wenku8Core
 
-public enum SidebarSection: String, CaseIterable, Identifiable {
+public enum SidebarSection: String, CaseIterable, Identifiable, Codable {
     case discovery = "发现"
     case bookshelf = "书架与历史"
     case catalog = "目录与选章"
@@ -23,6 +23,121 @@ public enum SidebarSection: String, CaseIterable, Identifiable {
         case .reader: return "book.pages.fill"
         case .tasks: return "arrow.down.circle.fill"
         case .settings: return "gearshape.fill"
+        }
+    }
+}
+
+public enum SettingsCategory: String, CaseIterable, Identifiable {
+    case general = "通用"
+    case appearance = "外观与主题"
+    case reader = "阅读器"
+    case account = "账号与云端"
+    case assembly = "EPUB 拼装"
+    case about = "关于"
+
+    public var id: String { rawValue }
+
+    public var subtitle: String {
+        switch self {
+        case .general: return "站点镜像、网络请求与本地下载目录"
+        case .appearance: return "深浅外观、主题强调色与自定义页面布局"
+        case .reader: return "默认字体、阅读纸张主题、翻页方式与版式"
+        case .account: return "Cookie 鉴权、自动保活刷新与云端书架"
+        case .assembly: return "EPUB 规范、封面彩插、排版清洗与命名模板"
+        case .about: return "版本信息、项目仓库、更新检查与默认重置"
+        }
+    }
+
+    public var icon: String {
+        switch self {
+        case .general: return "gearshape.fill"
+        case .appearance: return "paintpalette.fill"
+        case .reader: return "book.pages.fill"
+        case .account: return "person.crop.circle.fill"
+        case .assembly: return "shippingbox.fill"
+        case .about: return "info.circle.fill"
+        }
+    }
+
+    public var tintColor: Color {
+        switch self {
+        case .general: return .blue
+        case .appearance: return .purple
+        case .reader: return .teal
+        case .account: return .green
+        case .assembly: return .orange
+        case .about: return .indigo
+        }
+    }
+}
+
+public enum AppColorScheme: String, CaseIterable, Identifiable, Codable {
+    case system = "跟随系统"
+    case light = "浅色"
+    case dark = "深色"
+
+    public var id: String { rawValue }
+
+    public var colorScheme: ColorScheme? {
+        switch self {
+        case .system: return nil
+        case .light: return .light
+        case .dark: return .dark
+        }
+    }
+}
+
+public enum AppAccentTheme: String, CaseIterable, Identifiable, Codable {
+    case system = "系统默认"
+    case blue = "天空蓝"
+    case indigo = "靛紫"
+    case purple = "星辰紫"
+    case pink = "樱花粉"
+    case teal = "碧青"
+    case orange = "暖琥珀"
+
+    public var id: String { rawValue }
+
+    public var color: Color {
+        switch self {
+        case .system: return .accentColor
+        case .blue: return .blue
+        case .indigo: return .indigo
+        case .purple: return .purple
+        case .pink: return .pink
+        case .teal: return .teal
+        case .orange: return .orange
+        }
+    }
+
+    public var swatchColor: Color {
+        switch self {
+        case .system: return Color(nsColor: .controlAccentColor)
+        default: return color
+        }
+    }
+}
+
+public enum DiscoveryHomeChannel: String, CaseIterable, Identifiable, Codable {
+    case allvisit = "总点击榜"
+    case lastupdate = "最近更新"
+    case allvote = "总推荐榜"
+    case goodnum = "总收藏榜"
+    case fullflag = "完结专区"
+    case anime = "动画化作品"
+    case welcome = "空白引导页"
+
+    public var id: String { rawValue }
+
+    public var path: String? {
+        switch self {
+        case .allvisit: return "/modules/article/toplist.php?sort=allvisit"
+        case .lastupdate: return "/modules/article/toplist.php?sort=lastupdate"
+        case .allvote: return "/modules/article/toplist.php?sort=allvote"
+        case .goodnum: return "/modules/article/toplist.php?sort=goodnum"
+        case .fullflag: return "/modules/article/articlelist.php?fullflag=1"
+        case .anime: return "/modules/article/toplist.php?sort=anime"
+        case .welcome: return nil
         }
     }
 }
@@ -114,14 +229,60 @@ private struct PersistedAppState: Codable {
     var readerSpeechRate: Float?
     var readerBookmarks: [ReaderBookmarkNote]?
     var lastReadPageRatioByChapter: [String: Double]?
+    var appColorScheme: AppColorScheme?
+    var appAccentTheme: AppAccentTheme?
+    var startupSection: SidebarSection?
+    var defaultDiscoveryChannel: DiscoveryHomeChannel?
+    var hiddenSidebarSections: [String]?
+    var showSidebarQuickBookCard: Bool?
+    var showCardSummary: Bool?
+    var compactBookCards: Bool?
+    var autoCheckUpdatesOnLaunch: Bool?
+    var showAdvancedSettings: Bool?
+}
+
+public struct NavigationSnapshot: Equatable, Sendable {
+    public let section: SidebarSection
+    public let bookId: String?
+    public let chapterId: String?
+    public let discoveryTitle: String
+    public let activeDiscoverySort: String
+    public let searchQuery: String
+    public let searchScope: SearchScope
+    public let selectedTag: String?
+    public let tagSort: TagSortOption
+    public let discoveryPage: Int
 }
 
 @MainActor
 public final class StudioViewModel: ObservableObject {
-    @Published public var selectedSection: SidebarSection = .catalog
-    @Published public var bookInput: String = "3115"
+    @Published public var selectedSection: SidebarSection = .discovery
+    @Published public var activeSettingsCategory: SettingsCategory = .general
+    @Published public var bookInput: String = ""
     @Published public var chapterSearchQuery: String = ""
     @Published public var volumeRangeInput: String = ""
+
+    // Appearance & Custom Workspace Settings
+    @Published public var appColorScheme: AppColorScheme = .system
+    @Published public var appAccentTheme: AppAccentTheme = .system
+    @Published public var startupSection: SidebarSection = .discovery
+    @Published public var defaultDiscoveryChannel: DiscoveryHomeChannel = .allvisit
+    @Published public var hiddenSidebarSections: Set<String> = []
+    @Published public var showSidebarQuickBookCard: Bool = true
+    @Published public var showCardSummary: Bool = true
+    @Published public var compactBookCards: Bool = false
+    @Published public var showAdvancedSettings: Bool = true
+    @Published public var autoCheckUpdatesOnLaunch: Bool = false
+    @Published public var isCheckingUpdates: Bool = false
+    @Published public var latestReleaseTag: String?
+    @Published public var latestReleaseURL: String?
+    @Published public var updateCheckStatus: String?
+
+    @Published public private(set) var navigationBackStack: [NavigationSnapshot] = []
+    @Published public private(set) var navigationForwardStack: [NavigationSnapshot] = []
+
+    public var canGoBack: Bool { !navigationBackStack.isEmpty }
+    public var canGoForward: Bool { !navigationForwardStack.isEmpty }
 
     @Published public var bookDetail: BookDetail?
     @Published public var coverPreviewImage: NSImage?
@@ -242,6 +403,9 @@ public final class StudioViewModel: ObservableObject {
     private var cookieRefreshTask: Task<Void, Never>?
     private var foregroundObserver: NSObjectProtocol?
     private var inflightCoverURLs = Set<String>()
+    private var bookDetailCache: [String: BookDetail] = [:]
+    private var chapterContentCache: [String: ChapterContent] = [:]
+    private var isRestoringNavigationHistory = false
 
     public init() {
         let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first?.path
@@ -249,6 +413,7 @@ public final class StudioViewModel: ObservableObject {
         self.outputDirectoryPath = downloads
         self.client = Wenku8Client(baseURL: "https://www.wenku8.cc", cookie: "", timeout: 15, politeDelaySeconds: 0.25)
         loadPersistedState()
+        selectedSection = startupSection
         foregroundObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification,
             object: nil,
@@ -266,7 +431,138 @@ public final class StudioViewModel: ObservableObject {
                     self.syncBookshelfBidirectionally(silent: true)
                 }
             }
+            if autoCheckUpdatesOnLaunch {
+                await checkForAppUpdates(silent: true)
+            }
         }
+    }
+
+    public var appVersionDisplay: String {
+        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "2.5.0"
+    }
+
+    public var buildNumberDisplay: String {
+        (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? "5"
+    }
+
+    public func navigateToSettingsCategory(_ category: SettingsCategory) {
+        activeSettingsCategory = category
+        navigateToSection(.settings)
+    }
+
+    public func isSidebarSectionVisible(_ section: SidebarSection) -> Bool {
+        if section == .discovery || section == .settings {
+            return true
+        }
+        return !hiddenSidebarSections.contains(section.rawValue)
+    }
+
+    public func setSidebarSection(_ section: SidebarSection, visible: Bool) {
+        guard section != .discovery && section != .settings else { return }
+        if visible {
+            hiddenSidebarSections.remove(section.rawValue)
+        } else {
+            hiddenSidebarSections.insert(section.rawValue)
+            if startupSection == section {
+                startupSection = .discovery
+            }
+        }
+        savePersistedState()
+    }
+
+    public func checkForAppUpdates(silent: Bool = false) async {
+        guard !isCheckingUpdates else { return }
+        isCheckingUpdates = true
+        defer { isCheckingUpdates = false }
+
+        if !silent {
+            updateCheckStatus = "正在检查 GitHub 最新版本..."
+        }
+
+        let releaseAPI = URL(string: "https://api.github.com/repos/generalio/lightnovel-download/releases/latest")!
+        var req = URLRequest(url: releaseAPI)
+        req.timeoutInterval = 10
+        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: req)
+            if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                if !silent {
+                    updateCheckStatus = "检查失败：HTTP \(http.statusCode)"
+                }
+                return
+            }
+            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let tag = json["tag_name"] as? String {
+                let htmlURL = json["html_url"] as? String ?? "https://github.com/generalio/lightnovel-download/releases"
+                latestReleaseTag = tag
+                latestReleaseURL = htmlURL
+
+                let cleanRemote = tag.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
+                let cleanLocal = appVersionDisplay.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
+                if isVersion(cleanRemote, newerThan: cleanLocal) {
+                    updateCheckStatus = "发现新版本 \(tag)（当前 \(appVersionDisplay)）"
+                } else {
+                    updateCheckStatus = "已是最新版本（\(tag)）"
+                }
+            } else if !silent {
+                updateCheckStatus = "未解析到发行版本信息"
+            }
+        } catch {
+            if !silent {
+                updateCheckStatus = "检查更新失败：\(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func isVersion(_ remote: String, newerThan local: String) -> Bool {
+        let rParts = remote.split(separator: ".").compactMap { Int($0) }
+        let lParts = local.split(separator: ".").compactMap { Int($0) }
+        let count = max(rParts.count, lParts.count)
+        for i in 0..<count {
+            let r = i < rParts.count ? rParts[i] : 0
+            let l = i < lParts.count ? lParts[i] : 0
+            if r != l { return r > l }
+        }
+        return false
+    }
+
+    public func resetPreferencesToDefaults() {
+        baseURL = "https://www.wenku8.cc"
+        maxConcurrency = 4
+        politeDelaySeconds = 0.25
+        autoRefreshCookieEnabled = true
+        cookieRefreshIntervalMinutes = 15
+
+        appColorScheme = .system
+        appAccentTheme = .system
+        startupSection = .discovery
+        defaultDiscoveryChannel = .allvisit
+        hiddenSidebarSections.removeAll()
+        showSidebarQuickBookCard = true
+        showCardSummary = true
+        compactBookCards = false
+        autoCheckUpdatesOnLaunch = false
+        showAdvancedSettings = true
+
+        readerTheme = .sepia
+        readerPageMode = .curl
+        readerScriptMode = .original
+        readerFontFamily = .systemDefault
+        readerCustomFontName = "PingFang SC"
+        readerFontSize = 17
+        readerLineSpacing = 9
+        readerParagraphSpacing = 12
+        readerColumnWidth = 760
+        readerEdgePadding = 24
+        readerIndentEnabled = true
+        readerDualPageEnabled = false
+        readerSpeechRate = 0.50
+
+        assemblyConfig = AssemblyConfig()
+        savePersistedState()
+        Task { await syncClientSettings() }
+        statusBanner = "已恢复默认设置（保留账号 Cookie 与本地/云端书架）"
     }
 
     public func syncClientSettings() async {
@@ -306,17 +602,200 @@ public final class StudioViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Navigation Stack (Back / Forward / Smart Jump)
+
+    public func currentNavigationSnapshot() -> NavigationSnapshot {
+        NavigationSnapshot(
+            section: selectedSection,
+            bookId: bookDetail?.bookId,
+            chapterId: previewChapter?.chapter.id,
+            discoveryTitle: discoveryTitle,
+            activeDiscoverySort: activeDiscoverySort,
+            searchQuery: searchQuery,
+            searchScope: searchScope,
+            selectedTag: selectedTag,
+            tagSort: tagSortOption,
+            discoveryPage: discoveryPage
+        )
+    }
+
+    public func pushNavigationHistorySnapshot() {
+        guard !isRestoringNavigationHistory else { return }
+        let snap = currentNavigationSnapshot()
+        if navigationBackStack.last != snap {
+            navigationBackStack.append(snap)
+            if navigationBackStack.count > 50 {
+                navigationBackStack.removeFirst(navigationBackStack.count - 50)
+            }
+        }
+        navigationForwardStack.removeAll()
+    }
+
+    public func navigateToSection(_ section: SidebarSection, recordNavigation: Bool = true) {
+        if recordNavigation && selectedSection != section {
+            pushNavigationHistorySnapshot()
+        }
+        selectedSection = section
+    }
+
+    public func goBack() {
+        guard let target = navigationBackStack.popLast() else { return }
+        let current = currentNavigationSnapshot()
+        if navigationForwardStack.last != current {
+            navigationForwardStack.append(current)
+        }
+        restoreNavigationSnapshot(target)
+    }
+
+    public func goForward() {
+        guard let target = navigationForwardStack.popLast() else { return }
+        let current = currentNavigationSnapshot()
+        if navigationBackStack.last != current {
+            navigationBackStack.append(current)
+        }
+        restoreNavigationSnapshot(target)
+    }
+
+    private func restoreNavigationSnapshot(_ target: NavigationSnapshot) {
+        isRestoringNavigationHistory = true
+        defer { isRestoringNavigationHistory = false }
+
+        stopSpeech()
+        selectedSection = target.section
+
+        switch target.section {
+        case .discovery:
+            searchQuery = target.searchQuery
+            searchScope = target.searchScope
+            if !target.activeDiscoverySort.isEmpty {
+                if activeDiscoverySort != target.activeDiscoverySort || discoveryPage != target.discoveryPage || discoveryBooks.isEmpty {
+                    loadDiscoveryList(title: target.discoveryTitle, path: target.activeDiscoverySort, page: target.discoveryPage)
+                }
+            } else if let tag = target.selectedTag {
+                if selectedTag != tag || tagSortOption != target.tagSort || discoveryPage != target.discoveryPage || discoveryBooks.isEmpty {
+                    loadBooksByTag(tag, sort: target.tagSort, page: target.discoveryPage)
+                }
+            } else if !target.searchQuery.isEmpty {
+                if discoveryTitle != target.discoveryTitle || discoveryPage != target.discoveryPage || discoveryBooks.isEmpty {
+                    performDiscoverySearch(page: target.discoveryPage)
+                }
+            }
+
+        case .catalog:
+            if let targetBookId = target.bookId, bookDetail?.bookId != targetBookId {
+                loadBook(inputOverride: targetBookId, recordNavigation: false)
+            }
+
+        case .reader:
+            if let targetBookId = target.bookId, bookDetail?.bookId != targetBookId,
+               let cachedBook = bookDetailCache[targetBookId] {
+                applyLoadedBookDetail(cachedBook, switchToCatalog: false)
+            }
+            if let chapId = target.chapterId, previewChapter?.chapter.id != chapId,
+               let targetChap = bookDetail?.volumes.flatMap(\.chapters).first(where: { $0.id == chapId }) {
+                openChapterInReader(targetChap, startAtLastPage: false, recordNavigation: false)
+            }
+
+        case .bookshelf, .tasks, .settings:
+            break
+        }
+    }
+
+    public func handleQuickTopBarSubmit() {
+        let trimmed = bookInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            navigateToSection(.discovery)
+            return
+        }
+        if !Wenku8Client.extractBookId(from: trimmed).isEmpty {
+            loadBook(inputOverride: trimmed)
+        } else {
+            pushNavigationHistorySnapshot()
+            searchQuery = trimmed
+            searchScope = .articleName
+            selectedSection = .discovery
+            performDiscoverySearch(page: 1)
+        }
+    }
+
+    public func refreshCurrentView() {
+        switch selectedSection {
+        case .discovery:
+            if !activeDiscoverySort.isEmpty {
+                loadDiscoveryList(title: discoveryTitle, path: activeDiscoverySort, page: discoveryPage)
+            } else if let tag = selectedTag {
+                loadBooksByTag(tag, sort: tagSortOption, page: discoveryPage)
+            } else if !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                performDiscoverySearch(page: discoveryPage)
+            } else {
+                loadDiscoveryList(title: "总点击榜", path: "/modules/article/toplist.php?sort=allvisit", page: 1)
+            }
+        case .bookshelf:
+            syncBookshelfBidirectionally(silent: false)
+        case .catalog:
+            if let id = bookDetail?.bookId {
+                bookDetailCache.removeValue(forKey: id)
+                loadBook(inputOverride: id, recordNavigation: false)
+            } else if !bookInput.isEmpty {
+                loadBook(recordNavigation: false)
+            }
+        case .reader:
+            if let chap = previewChapter?.chapter {
+                chapterContentCache.removeValue(forKey: chap.id)
+                openChapterInReader(chap, startAtLastPage: false, recordNavigation: false)
+            }
+        case .tasks:
+            break
+        case .settings:
+            testCookieValidity()
+        }
+    }
+
     // MARK: - Book Loading & Selection
 
-    public func loadBook(inputOverride: String? = nil) {
+    private func applyLoadedBookDetail(_ detail: BookDetail, switchToCatalog: Bool) {
+        bookDetail = detail
+        bookDetailCache[detail.bookId] = detail
+        if switchToCatalog {
+            selectedSection = .catalog
+        }
+        expandedVolumeIds = Set(detail.volumes.prefix(2).map(\.id))
+        if let firstVol = detail.volumes.first {
+            selectedChapterIds = Set(firstVol.chapters.map(\.id))
+        } else {
+            selectedChapterIds = []
+        }
+        if !detail.coverURL.isEmpty, let cachedImg = coverImageCache[detail.coverURL] {
+            coverPreviewImage = cachedImg
+        }
+    }
+
+    public func loadBook(inputOverride: String? = nil, recordNavigation: Bool = true) {
         let query = (inputOverride ?? bookInput).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else {
             errorBanner = "请输入书号或书籍网址"
             return
         }
+        let targetId = Wenku8Client.extractBookId(from: query)
+        if recordNavigation {
+            let alreadyViewing = (selectedSection == .catalog && !targetId.isEmpty && bookDetail?.bookId == targetId)
+            if !alreadyViewing {
+                pushNavigationHistorySnapshot()
+            }
+        }
         bookInput = query
         errorBanner = nil
         statusBanner = nil
+
+        if !targetId.isEmpty, let cached = bookDetailCache[targetId] {
+            applyLoadedBookDetail(cached, switchToCatalog: true)
+            recordHistory(detail: cached)
+            if coverPreviewImage == nil && !cached.coverURL.isEmpty {
+                ensureCoverLoaded(urlString: cached.coverURL)
+            }
+            return
+        }
+
         isLoadingBook = true
         selectedReview = nil
         reviewPosts = []
@@ -332,26 +811,22 @@ public final class StudioViewModel: ObservableObject {
                         self?.appendLog(msg)
                     }
                 }
-                self.bookDetail = detail
-                self.selectedSection = .catalog
-                self.expandedVolumeIds = Set(detail.volumes.prefix(2).map(\.id))
-                if let firstVol = detail.volumes.first {
-                    self.selectedChapterIds = Set(firstVol.chapters.map(\.id))
-                } else {
-                    self.selectedChapterIds = []
-                }
+                self.applyLoadedBookDetail(detail, switchToCatalog: true)
                 self.recordHistory(detail: detail)
                 self.appendLog("拉取成功：《\(detail.title)》（\(detail.author)），共 \(detail.volumes.count) 卷")
 
-                // Load cover asynchronously (with fallback to Vol 1 illustration image)
                 self.coverPreviewImage = nil
                 var loadedCover: NSImage?
                 if !detail.coverURL.isEmpty {
-                    do {
-                        let coverAsset = try await client.downloadSingleImage(urlString: detail.coverURL, referer: detail.baseURL)
-                        loadedCover = NSImage(data: coverAsset.data)
-                    } catch {
-                        self.appendLog("主页封面加载失败（\(detail.coverURL)）：\(error.localizedDescription)")
+                    if let existing = self.coverImageCache[detail.coverURL] {
+                        loadedCover = existing
+                    } else {
+                        do {
+                            let coverAsset = try await client.downloadSingleImage(urlString: detail.coverURL, referer: detail.baseURL)
+                            loadedCover = NSImage(data: coverAsset.data)
+                        } catch {
+                            self.appendLog("主页封面加载失败（\(detail.coverURL)）：\(error.localizedDescription)")
+                        }
                     }
                 }
                 if loadedCover == nil,
@@ -465,18 +940,44 @@ public final class StudioViewModel: ObservableObject {
 
     // MARK: - Built-in Reader
 
-    public func openChapterInReader(_ chapter: ChapterItem, startAtLastPage: Bool = false) {
+    public func openChapterInReader(_ chapter: ChapterItem, startAtLastPage: Bool = false, recordNavigation: Bool = true) {
         stopSpeech()
+        if recordNavigation {
+            let alreadyOnChapter = (selectedSection == .reader && previewChapter?.chapter.id == chapter.id)
+            if !alreadyOnChapter {
+                pushNavigationHistorySnapshot()
+            }
+        }
         selectedSection = .reader
-        isLoadingPreview = true
-        previewImages = [:]
         errorBanner = nil
         readerStartAtEndOnOpen = startAtLastPage
+
+        if let cached = chapterContentCache[chapter.id] {
+            previewChapter = cached
+            var imgs: [String: NSImage] = [:]
+            for url in cached.imageURLs {
+                if let img = coverImageCache[url] {
+                    imgs[url] = img
+                }
+            }
+            if imgs.count == cached.imageURLs.count {
+                previewImages = imgs
+                if let bookId = bookDetail?.bookId {
+                    lastReadChapterByBook[bookId] = chapter.id
+                    savePersistedState()
+                }
+                return
+            }
+        }
+
+        isLoadingPreview = true
+        previewImages = [:]
 
         Task { [weak self] in
             guard let self else { return }
             do {
                 let content = try await client.fetchChapterContent(chapter: chapter, baseURL: bookDetail?.baseURL)
+                self.chapterContentCache[chapter.id] = content
                 self.previewChapter = content
                 if let bookId = self.bookDetail?.bookId {
                     self.lastReadChapterByBook[bookId] = chapter.id
@@ -492,6 +993,7 @@ public final class StudioViewModel: ObservableObject {
                     for (url, asset) in downloaded {
                         if let nsImg = NSImage(data: asset.data) {
                             imgs[url] = nsImg
+                            self.coverImageCache[url] = nsImg
                         }
                     }
                     self.previewImages = imgs
@@ -650,6 +1152,7 @@ public final class StudioViewModel: ObservableObject {
 
     public func loadAuthorWorks(author: String) {
         guard !author.isEmpty else { return }
+        pushNavigationHistorySnapshot()
         searchQuery = author
         searchScope = .author
         selectedSection = .discovery
@@ -918,11 +1421,12 @@ public final class StudioViewModel: ObservableObject {
             do {
                 let detail = try await client.fetchBookDetail(rawInput: entry.id)
                 self.bookDetail = detail
+                self.bookDetailCache[detail.bookId] = detail
                 self.recordHistory(detail: detail)
                 if let match = detail.volumes.flatMap(\.chapters).first(where: { $0.url.contains("/\(entry.cloudChapterId).htm") }) {
                     self.openChapterInReader(match)
                 } else {
-                    self.selectedSection = .catalog
+                    self.navigateToSection(.catalog)
                 }
             } catch {
                 self.errorBanner = error.localizedDescription
@@ -1322,7 +1826,7 @@ public final class StudioViewModel: ObservableObject {
         isDownloading = true
         progressFraction = 0
         currentStageText = forceMergedSingle ? "准备整本打包单本 EPUB..." : "准备下载..."
-        selectedSection = .tasks
+        navigateToSection(.tasks)
         savePersistedState()
 
         var configSnapshot = assemblyConfig
@@ -1571,7 +2075,17 @@ public final class StudioViewModel: ObservableObject {
             readerDualPageEnabled: readerDualPageEnabled,
             readerSpeechRate: readerSpeechRate,
             readerBookmarks: readerBookmarks,
-            lastReadPageRatioByChapter: lastReadPageRatioByChapter
+            lastReadPageRatioByChapter: lastReadPageRatioByChapter,
+            appColorScheme: appColorScheme,
+            appAccentTheme: appAccentTheme,
+            startupSection: startupSection,
+            defaultDiscoveryChannel: defaultDiscoveryChannel,
+            hiddenSidebarSections: Array(hiddenSidebarSections),
+            showSidebarQuickBookCard: showSidebarQuickBookCard,
+            showCardSummary: showCardSummary,
+            compactBookCards: compactBookCards,
+            autoCheckUpdatesOnLaunch: autoCheckUpdatesOnLaunch,
+            showAdvancedSettings: showAdvancedSettings
         )
         if let data = try? JSONEncoder().encode(state) {
             try? data.write(to: stateFileURL)
@@ -1614,6 +2128,19 @@ public final class StudioViewModel: ObservableObject {
         if let sr = state.readerSpeechRate { readerSpeechRate = sr }
         if let rbm = state.readerBookmarks { readerBookmarks = rbm }
         if let ratios = state.lastReadPageRatioByChapter { lastReadPageRatioByChapter = ratios }
+        if let scheme = state.appColorScheme { appColorScheme = scheme }
+        if let accent = state.appAccentTheme { appAccentTheme = accent }
+        if let startSec = state.startupSection, !hiddenSidebarSections.contains(startSec.rawValue) { startupSection = startSec }
+        if let defChan = state.defaultDiscoveryChannel { defaultDiscoveryChannel = defChan }
+        hiddenSidebarSections = Set(state.hiddenSidebarSections ?? [])
+        if let hiddenCheck = state.startupSection, hiddenSidebarSections.contains(hiddenCheck.rawValue) {
+            startupSection = .discovery
+        }
+        if let quickCard = state.showSidebarQuickBookCard { showSidebarQuickBookCard = quickCard }
+        if let summary = state.showCardSummary { showCardSummary = summary }
+        if let compact = state.compactBookCards { compactBookCards = compact }
+        if let autoUpd = state.autoCheckUpdatesOnLaunch { autoCheckUpdatesOnLaunch = autoUpd }
+        if let adv = state.showAdvancedSettings { showAdvancedSettings = adv }
     }
 }
 

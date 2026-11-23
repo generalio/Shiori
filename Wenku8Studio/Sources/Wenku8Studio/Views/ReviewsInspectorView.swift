@@ -20,14 +20,10 @@ struct ReviewsInspectorView: View {
     private var inspectorHeader: some View {
         HStack {
             if vm.selectedReview != nil {
-                Button {
+                StudioPillButton(title: "返回列表", systemImage: "chevron.left", size: .small) {
                     vm.selectedReview = nil
                     vm.reviewPosts = []
-                } label: {
-                    Label("返回列表", systemImage: "chevron.left")
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
             } else {
                 Label("书评与吐槽", systemImage: "bubble.left.and.bubble.right.fill")
                     .font(.headline)
@@ -35,13 +31,9 @@ struct ReviewsInspectorView: View {
 
             Spacer()
 
-            Button {
+            StudioCircleButton(systemImage: "xmark", size: .small, accessibilityLabel: "关闭书评面板") {
                 vm.showReviewsInspector = false
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.secondary)
             }
-            .buttonStyle(.plain)
             .help("关闭书评面板")
         }
         .padding(.horizontal, 14)
