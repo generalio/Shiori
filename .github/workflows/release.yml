@@ -40,7 +40,7 @@ jobs:
             -scheme Wenku8Studio \
             -destination 'platform=macOS'
 
-      - name: Build ShioriStudio.app
+      - name: Build Shiori.app
         run: ./Wenku8Studio/build_app.sh
 
       - name: Package .zip and .dmg artifacts
@@ -48,18 +48,18 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME:-${{ inputs.tag || 'dev' }}}"
           mkdir -p dist_release/dmg_staging
-          ditto ShioriStudio.app dist_release/dmg_staging/ShioriStudio.app
+          ditto Shiori.app dist_release/dmg_staging/Shiori.app
           ln -s /Applications dist_release/dmg_staging/Applications
           touch dist_release/dmg_staging/.metadata_never_index
 
-          ZIP_NAME="ShioriStudio-${VERSION}-macOS-arm64.zip"
-          DMG_NAME="ShioriStudio-${VERSION}-macOS-arm64.dmg"
+          ZIP_NAME="Shiori-${VERSION}-macOS-arm64.zip"
+          DMG_NAME="Shiori-${VERSION}-macOS-arm64.dmg"
 
-          ditto -c -k --sequesterRsrc --keepParent ShioriStudio.app "dist_release/${ZIP_NAME}"
+          ditto -c -k --sequesterRsrc --keepParent Shiori.app "dist_release/${ZIP_NAME}"
 
           for attempt in 1 2 3 4 5; do
             echo "Creating DMG (attempt $attempt)..."
-            if hdiutil create -volname "Shiori Studio ${VERSION}" \
+            if hdiutil create -volname "Shiori ${VERSION}" \
               -srcfolder dist_release/dmg_staging \
               -ov -format UDZO "dist_release/${DMG_NAME}"; then
               break
@@ -78,7 +78,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.pkg.outputs.version }}
-          name: "Shiori Studio ${{ steps.pkg.outputs.version }}"
+          name: "Shiori ${VERSION}"
           generate_release_notes: true
           files: |
             dist_release/*.dmg

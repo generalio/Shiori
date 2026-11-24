@@ -20,7 +20,7 @@ struct Wenku8StudioApp: App {
     @StateObject private var viewModel = StudioViewModel()
 
     var body: some Scene {
-        WindowGroup("Shiori Studio · 轻小说阅读与 EPUB 拼装工坊") {
+        WindowGroup("Shiori · 轻小说阅读与 EPUB 拼装工坊") {
             ContentView()
                 .environmentObject(viewModel)
                 .frame(minWidth: 1020, minHeight: 680)
@@ -29,7 +29,7 @@ struct Wenku8StudioApp: App {
         .defaultSize(width: 1220, height: 780)
         .commands {
             CommandGroup(replacing: .appInfo) {
-                Button("关于 Shiori Studio") {
+                Button("关于 Shiori") {
                     viewModel.navigateToSettingsCategory(.about)
                 }
             }

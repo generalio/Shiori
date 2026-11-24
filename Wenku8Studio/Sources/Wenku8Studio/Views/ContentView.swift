@@ -72,7 +72,7 @@ struct ContentView: View {
                 .shadow(color: StudioTokens.cardShadowColor, radius: 3, y: 1)
 
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Shiori Studio")
+                    Text("Shiori")
                         .font(.headline.weight(.bold))
                     Text(vm.baseURL.replacingOccurrences(of: "https://", with: ""))
                         .font(.caption2)

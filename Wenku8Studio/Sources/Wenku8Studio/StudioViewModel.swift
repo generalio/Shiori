@@ -440,7 +440,7 @@ public final class StudioViewModel: ObservableObject {
     private let bilinovelPlugin: BilinovelPlugin
     private let webKitFetchService = WebKitFetchService()
     private let epubBuilder = EPUBBuilder()
-    private let persistenceQueue = DispatchQueue(label: "com.lightnovel.ShioriStudio.persistence", qos: .utility)
+    private let persistenceQueue = DispatchQueue(label: "com.lightnovel.Shiori.persistence", qos: .utility)
     private var activeDownloadTask: Task<Void, Never>?
     private var cookieRefreshTask: Task<Void, Never>?
     private var foregroundObserver: NSObjectProtocol?
@@ -533,11 +533,11 @@ public final class StudioViewModel: ObservableObject {
     }
 
     public var appVersionDisplay: String {
-        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "2.5.0"
+        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "2.6.0"
     }
 
     public var buildNumberDisplay: String {
-        (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? "5"
+        (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? "6"
     }
 
     public func navigateToSettingsCategory(_ category: SettingsCategory) {
@@ -574,7 +574,7 @@ public final class StudioViewModel: ObservableObject {
             updateCheckStatus = "正在检查 GitHub 最新版本..."
         }
 
-        let releaseAPI = URL(string: "https://api.github.com/repos/generalio/lightnovel-download/releases/latest")!
+        let releaseAPI = URL(string: "https://api.github.com/repos/generalio/Shiori/releases/latest")!
         var req = URLRequest(url: releaseAPI)
         req.timeoutInterval = 10
         req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
@@ -589,7 +589,7 @@ public final class StudioViewModel: ObservableObject {
             }
             if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                let tag = json["tag_name"] as? String {
-                let htmlURL = json["html_url"] as? String ?? "https://github.com/generalio/lightnovel-download/releases"
+                let htmlURL = json["html_url"] as? String ?? "https://github.com/generalio/Shiori/releases"
                 latestReleaseTag = tag
                 latestReleaseURL = htmlURL
 
@@ -963,8 +963,16 @@ public final class StudioViewModel: ObservableObject {
         } else {
             selectedChapterIds = []
         }
-        if !detail.coverURL.isEmpty, let cachedImg = coverImageCache[detail.coverURL] {
-            coverPreviewImage = cachedImg
+        if !detail.coverURL.isEmpty {
+            if let cachedThumb = CoverThumbnailCache.shared.cachedImage(urlString: detail.coverURL, sourceId: detail.sourceId) {
+                coverPreviewImage = cachedThumb
+            } else if let cachedImg = coverImageCache[detail.coverURL] {
+                coverPreviewImage = cachedImg
+            } else {
+                coverPreviewImage = nil
+            }
+        } else {
+            coverPreviewImage = nil
         }
     }
 
@@ -1018,33 +1026,39 @@ public final class StudioViewModel: ObservableObject {
                 }
                 self.applyLoadedBookDetail(detail, switchToCatalog: true)
                 self.recordHistory(detail: detail)
+                self.isLoadingBook = false
                 self.appendLog("拉取成功：《\(detail.title)》（\(detail.author)），共 \(detail.volumes.count) 卷")
 
-                self.coverPreviewImage = nil
-                var loadedCover: NSImage?
-                if !detail.coverURL.isEmpty {
-                    if let existing = self.coverImageCache[detail.coverURL] {
-                        loadedCover = existing
-                    } else {
-                        do {
-                            let coverAsset = try await targetPlugin.downloadImage(url: detail.coverURL, referer: detail.baseURL)
-                            loadedCover = NSImage(data: coverAsset.data)
-                        } catch {
-                            self.appendLog("主页封面加载失败（\(detail.coverURL)）：\(error.localizedDescription)")
+                let expectedScopedId = detail.scopedId
+                Task { [weak self] in
+                    guard let self else { return }
+                    var loadedCover: NSImage?
+                    if !detail.coverURL.isEmpty {
+                        if let existing = self.coverImageCache[detail.coverURL] {
+                            loadedCover = existing
+                        } else {
+                            do {
+                                let coverAsset = try await targetPlugin.downloadImage(url: detail.coverURL, referer: detail.baseURL)
+                                loadedCover = NSImage(data: coverAsset.data)
+                            } catch {
+                                self.appendLog("主页封面加载失败（\(detail.coverURL)）：\(error.localizedDescription)")
+                            }
                         }
                     }
-                }
-                if loadedCover == nil,
-                   let firstIllusChap = detail.volumes.first?.chapters.first(where: { $0.isIllustrationChapter }) {
-                    if let illusContent = try? await targetPlugin.fetchChapterContent(chapter: firstIllusChap, book: detail),
-                       let firstImgURL = illusContent.imageURLs.first,
-                       let illusAsset = try? await targetPlugin.downloadImage(url: firstImgURL, referer: detail.baseURL) {
-                        loadedCover = NSImage(data: illusAsset.data)
+                    if loadedCover == nil,
+                       let firstIllusChap = detail.volumes.first?.chapters.first(where: { $0.isIllustrationChapter }) {
+                        if let illusContent = try? await targetPlugin.fetchChapterContent(chapter: firstIllusChap, book: detail),
+                           let firstImgURL = illusContent.imageURLs.first,
+                           let illusAsset = try? await targetPlugin.downloadImage(url: firstImgURL, referer: detail.baseURL) {
+                            loadedCover = NSImage(data: illusAsset.data)
+                        }
                     }
-                }
-                self.coverPreviewImage = loadedCover
-                if let loadedCover, !detail.coverURL.isEmpty {
-                    self.coverImageCache[detail.coverURL] = loadedCover
+                    if let loadedCover, self.bookDetail?.scopedId == expectedScopedId {
+                        self.coverPreviewImage = loadedCover
+                        if !detail.coverURL.isEmpty {
+                            self.coverImageCache[detail.coverURL] = loadedCover
+                        }
+                    }
                 }
             } catch let SourceError.challengeRequired(sourceId, _, msg) {
                 self.errorBanner = msg
@@ -2417,17 +2431,17 @@ public final class StudioViewModel: ObservableObject {
     private var stateFileURL: URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support")
-        let dir = appSupport.appendingPathComponent("ShioriStudio", isDirectory: true)
+        let dir = appSupport.appendingPathComponent("Shiori", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("state.json")
     }
 
-    private var legacyStateFileURL: URL {
+    private var legacyStateFileURLs: [URL] {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support")
-        return appSupport
-            .appendingPathComponent("Wenku8Studio", isDirectory: true)
-            .appendingPathComponent("state.json")
+        return ["ShioriStudio", "Wenku8Studio"].map {
+            appSupport.appendingPathComponent($0, isDirectory: true).appendingPathComponent("state.json")
+        }
     }
 
     public func savePersistedState() {
@@ -2487,7 +2501,7 @@ public final class StudioViewModel: ObservableObject {
 
     private func loadPersistedState() {
         let primaryData = try? Data(contentsOf: stateFileURL)
-        let loadedData = primaryData ?? (try? Data(contentsOf: legacyStateFileURL))
+        let loadedData = primaryData ?? legacyStateFileURLs.lazy.compactMap { try? Data(contentsOf: $0) }.first
         guard let data = loadedData,
               let state = try? JSONDecoder().decode(PersistedAppState.self, from: data) else {
             return

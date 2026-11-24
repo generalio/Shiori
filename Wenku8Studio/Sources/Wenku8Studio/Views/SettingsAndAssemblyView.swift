@@ -161,7 +161,7 @@ struct SettingsAndAssemblyView: View {
                         .strokeBorder(StudioTokens.hairlineStroke, lineWidth: 0.8)
                 }
 
-                Text("Shiori Studio \(vm.appVersionDisplay) (\(vm.buildNumberDisplay))")
+                Text("Shiori \(vm.appVersionDisplay) (\(vm.buildNumberDisplay))")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .padding(.horizontal, 6)
@@ -348,7 +348,7 @@ struct SettingsAndAssemblyView: View {
             }
 
             SettingsCardGroup(title: "自定义启动与页面") {
-                SettingsRow(title: "应用默认启动页", subtitle: "启动 Shiori Studio 时默认呈现的功能工作区") {
+                SettingsRow(title: "应用默认启动页", subtitle: "启动 Shiori 时默认呈现的功能工作区") {
                     let startupCandidates = SidebarSection.allCases.filter { vm.isSidebarSectionVisible($0) && $0 != .settings }
                     Picker("", selection: $vm.startupSection) {
                         ForEach(startupCandidates) { sec in
@@ -907,7 +907,7 @@ struct SettingsAndAssemblyView: View {
                     appIconView(size: 62)
 
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Shiori Studio")
+                        Text("Shiori")
                             .font(.title3.weight(.bold))
                         Text("版本 \(vm.appVersionDisplay) (\(vm.buildNumberDisplay))")
                             .font(.caption)
@@ -923,9 +923,9 @@ struct SettingsAndAssemblyView: View {
 
                 Divider()
 
-                SettingsRow(title: "GitHub 仓库", subtitle: "github.com/generalio/lightnovel-download") {
+                SettingsRow(title: "GitHub 仓库", subtitle: "github.com/generalio/Shiori") {
                     StudioPillButton(title: "在浏览器中打开", systemImage: "safari", size: .small) {
-                        if let url = URL(string: "https://github.com/generalio/lightnovel-download") {
+                        if let url = URL(string: "https://github.com/generalio/Shiori") {
                             NSWorkspace.shared.open(url)
                         }
                     }

@@ -1,12 +1,12 @@
 # Repository Guidelines & UI Component Specifications
 
-This repository contains **lightnovel-download** (Python CLI + core EPUB builder) and **Shiori Studio** (native macOS SwiftUI client targeting macOS `26.0`, built on `Wenku8Core` + `Wenku8Studio`).
+This repository contains **lightnovel-download** (Python CLI + core EPUB builder) and **Shiori** (native macOS SwiftUI client targeting macOS `26.0`, built on `Wenku8Core` + `Wenku8Studio`).
 
 ---
 
 ## 1. Repository Layout & Build Commands
 
-- `Wenku8Studio/project.yml` — XcodeGen project specification (`Wenku8Core`, `Wenku8Studio` producing `ShioriStudio.app`, `Wenku8CoreTests`). Always re-run `xcodegen generate` inside `Wenku8Studio/` after adding or removing `.swift` files.
+- `Wenku8Studio/project.yml` — XcodeGen project specification (`Wenku8Core`, `Wenku8Studio` producing `Shiori.app`, `Wenku8CoreTests`). Always re-run `xcodegen generate` inside `Wenku8Studio/` after adding or removing `.swift` files.
 - `Wenku8Studio/Sources/Wenku8Core/` — `BookSourceKit` SPI, `SourceAggregationEngine` (`SourceRegistry`, `AggregatedSearchEngine`), `Plugins/` (`Wenku8Plugin`, hot-pluggable `BilinovelPlugin`), HTML/metadata parsing, Cloud Bookcase & cookie handling, EPUB packaging.
 - `Wenku8Studio/Sources/Wenku8Studio/` — SwiftUI app, `StudioViewModel.swift`, `Services/` (`CoverThumbnailCache`, `WebKitFetchService`), and UI views under `Views/`.
 - `lightnovel.py`, `Editer.py`, `utils.py` — Python CLI and EPUB processing utilities.
@@ -19,7 +19,7 @@ This repository contains **lightnovel-download** (Python CLI + core EPUB builder
 (cd Wenku8Studio && xcodegen generate) && \
   xcodebuild test -project Wenku8Studio/Wenku8Studio.xcodeproj -scheme Wenku8Studio -destination 'platform=macOS'
 
-# 2. Build standalone ShioriStudio.app bundle (gitignored build artifact)
+# 2. Build standalone Shiori.app bundle (gitignored build artifact)
 ./Wenku8Studio/build_app.sh
 
 # 3. Run Python core tests
@@ -29,7 +29,7 @@ This repository contains **lightnovel-download** (Python CLI + core EPUB builder
 ### Toolchain & Git Constraints
 
 - **No `.metal` files**: The local Xcode environment does not include the standalone Metal Toolchain; prefer GPU-backed CoreImage filters (e.g., `CIPageCurlWithShadowTransition` in `SimulationPageReaderView.swift`) and native SwiftUI animations.
-- **No build artifacts in git**: Never commit `ShioriStudio.app`, `Wenku8Studio.app`, `.build`, or `.build_xcode`.
+- **No build artifacts in git**: Never commit `Shiori.app`, `ShioriStudio.app`, `Wenku8Studio.app`, `.build`, or `.build_xcode`.
 - **macOS App Icon Spec**: Assets in `Wenku8Studio/AppResources/Assets.xcassets/AppIcon.appiconset/` must keep transparent outer canvas padding (`824/1024` inner tile ratio) with a `.continuous` squircle (`22.5%` corner radius of inner tile) and subtle drop shadow per macOS HIG. Keep `icon_raw.png` intact as the full-bleed source artwork.
 
 ---

@@ -1,14 +1,14 @@
 <div align="center">
-  <img src="Wenku8Studio/AppResources/icon_raw.png" width="136" style="border-radius: 28px;" alt="Shiori Studio Icon"/>
-  <h1>Shiori Studio</h1>
+  <img src="Wenku8Studio/AppResources/icon_raw.png" width="136" style="border-radius: 28px;" alt="Shiori Icon"/>
+  <h1>Shiori</h1>
   <p><strong>栞 · macOS 原生多书源轻小说阅读与 EPUB 出版工坊（含全功能 Python CLI）</strong></p>
 
   <p>
-    <a href="https://github.com/generalio/lightnovel-download/actions/workflows/ci.yml">
-      <img src="https://github.com/generalio/lightnovel-download/actions/workflows/ci.yml/badge.svg" alt="CI"/>
+    <a href="https://github.com/generalio/Shiori/actions/workflows/ci.yml">
+      <img src="https://github.com/generalio/Shiori/actions/workflows/ci.yml/badge.svg" alt="CI"/>
     </a>
-    <a href="https://github.com/generalio/lightnovel-download/releases">
-      <img src="https://img.shields.io/github/v/release/generalio/lightnovel-download?style=flat-square&color=559DCD" alt="Release"/>
+    <a href="https://github.com/generalio/Shiori/releases">
+      <img src="https://img.shields.io/github/v/release/generalio/Shiori?style=flat-square&color=559DCD" alt="Release"/>
     </a>
     <a href="LICENSE">
       <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="MIT License"/>
@@ -33,9 +33,9 @@
 
 ## 简介
 
-**Shiori Studio**（取自日语「栞 Shiori」，意为夹在书页间的阅读书签）是一套面向轻小说阅读、多渠道插件化聚合检索与 **EPUB 3.0 / 2.0 出版级定制拼装工具**，由两部分构成：
+**Shiori**（取自日语「栞 Shiori」，意为夹在书页间的阅读书签）是一套面向轻小说阅读、多渠道插件化聚合检索与 **EPUB 3.0 / 2.0 出版级定制拼装工具**，由两部分构成：
 
-1. **macOS 原生桌面客户端（`ShioriStudio.app`）**：基于 SwiftUI + macOS 26+ 原生 **Liquid Glass（液态玻璃）** 打造，采用模块化 `BookSourceKit` + `SourceAggregationEngine` 热插拔书源插件架构（当前默认启用 [轻小说文库（wenku8）](https://www.wenku8.cc)，并保留哔哩轻小说等可扩展插件槽位），提供发现与多渠道聚合检索、图文书架与浏览历史、可视化分卷/章节勾选、内置沉浸阅读器（含插图大图灯箱预览）、右侧滑出书评楼中楼及 EPUB 拼装配置。
+1. **macOS 原生桌面客户端（`Shiori.app`）**：基于 SwiftUI + macOS 26+ 原生 **Liquid Glass（液态玻璃）** 打造，采用模块化 `BookSourceKit` + `SourceAggregationEngine` 热插拔书源插件架构（当前默认启用 [轻小说文库（wenku8）](https://www.wenku8.cc)，并保留哔哩轻小说等可扩展插件槽位），提供发现与多渠道聚合检索、图文书架与浏览历史、可视化分卷/章节勾选、内置沉浸阅读器（含插图大图灯箱预览）、右侧滑出书评楼中楼及 EPUB 拼装配置。
 2. **跨平台命令行工具（`lightnovel.py`）**：轻量、无图形依赖，具备与桌面端对等的书籍检索、书评查看、终端阅读、单卷/多卷合集 EPUB 拼装能力，适合批处理与终端用户。
 
 ---
@@ -62,9 +62,20 @@
 ## 界面预览
 
 <div align="center">
-  <img src="docs/screenshots/bookshelf.jpg" width="880" alt="macOS 客户端书架与最近浏览"/>
+  <p><strong>发现与多渠道聚合检索</strong></p>
+  <img src="docs/screenshots/discovery.jpg" width="880" alt="Shiori 发现与多渠道聚合检索"/>
   <br/><br/>
-  <img src="docs/screenshots/book_card.jpg" width="440" alt="统一书籍卡片组件"/>
+  <p><strong>云端书架同步与浏览历史</strong></p>
+  <img src="docs/screenshots/bookshelf.jpg" width="880" alt="Shiori 书架与最近浏览"/>
+  <br/><br/>
+  <p><strong>目录选章与右侧书评抽屉</strong></p>
+  <img src="docs/screenshots/catalog.jpg" width="880" alt="Shiori 书籍详情、分卷选章与书评抽屉"/>
+  <br/><br/>
+  <p><strong>仿真翻页阅读器 · 多主题与插图灯箱</strong></p>
+  <img src="docs/screenshots/reader.jpg" width="880" alt="Shiori 内置仿真翻页阅读器"/>
+  <br/><br/>
+  <p><strong>设置与多书源插件管理</strong></p>
+  <img src="docs/screenshots/settings.jpg" width="880" alt="Shiori 设置与关于页面"/>
 </div>
 
 ---
@@ -73,11 +84,11 @@
 
 ### 方式一：下载 macOS Release 安装包
 
-前往 [Releases 页面](https://github.com/generalio/lightnovel-download/releases) 下载最新 `ShioriStudio-v*-macOS-arm64.dmg` 或 `.zip`，拖入「应用程序」即可运行（macOS 26+ Apple Silicon）。
+前往 [Releases 页面](https://github.com/generalio/Shiori/releases) 下载最新 `Shiori-v*-macOS-arm64.dmg` 或 `.zip`，拖入「应用程序」即可运行（macOS 26+ Apple Silicon）。
 
 > 若首次打开提示来自未签名开发者，可在系统「隐私与安全性」中允许打开，或执行：
 > ```bash
-> xattr -cr /Applications/ShioriStudio.app
+> xattr -cr /Applications/Shiori.app
 > ```
 
 ### 方式二：从源码使用 Xcode 构建 macOS 客户端
@@ -87,7 +98,7 @@
 ```bash
 brew install xcodegen
 ./Wenku8Studio/build_app.sh
-open ShioriStudio.app
+open Shiori.app
 ```
 
 运行 Swift 单元测试：
@@ -157,7 +168,7 @@ python lightnovel.py --book_no 3115 --read 1:2
 仓库已配置自动化 GitHub Actions 工作流：
 
 - **持续集成**（[ci.yml](.github/workflows/ci.yml)）：推送或 PR 至主分支时自动运行 Python CLI/EPUB 测试与 macOS Xcode 编译测试。
-- **Tag 自动发版**（[release.yml](.github/workflows/release.yml)）：推送 `v*` 标签时自动运行测试、编译 `ShioriStudio.app` 并打包发布 macOS `.dmg` 与 `.zip` 至 GitHub Releases：
+- **Tag 自动发版**（[release.yml](.github/workflows/release.yml)）：推送 `v*` 标签时自动运行测试、编译 `Shiori.app` 并打包发布 macOS `.dmg` 与 `.zip` 至 GitHub Releases：
 
 ```bash
 git tag v2.4.0
@@ -169,9 +180,9 @@ git push origin v2.4.0
 ## 目录结构
 
 ```text
-lightnovel-download/
+Shiori/
 ├── .github/workflows/          # GitHub Actions CI & macOS Tag 自动发版工作流
-├── Wenku8Studio/               # Shiori Studio — macOS 原生 SwiftUI 客户端（Liquid Glass）
+├── Wenku8Studio/               # Shiori — macOS 原生 SwiftUI 客户端（Liquid Glass）
 │   ├── Sources/Wenku8Core/     # BookSourceKit SPI、书源聚合引擎、网络抓取与 EPUB 组装内核
 │   ├── Sources/Wenku8Studio/   # SwiftUI 视图、缩略图缓存与状态管理
 │   ├── Tests/Wenku8CoreTests/  # Swift XCTest 单元测试
@@ -192,7 +203,7 @@ lightnovel-download/
 
 ## 致谢与原项目
 
-本项目的 Python 核心解析与初期 EPUB 构建思路源自开源项目 **[ShqWW/lightnovel-download](https://github.com/ShqWW/lightnovel-download)**（原作者 `ShqWW` / 王老板）。在此基础上，本仓库进行了独立架构演进与大幅功能重构——新增了原生 macOS SwiftUI 客户端（**Shiori Studio**）、`Wenku8Core` 多书源插件化与云端书架双向同步引擎、EPUB 3.0 组装与仿真阅读器，以及扩展的 CLI 与自动化 CI/CD 发版管线，特此向原项目致谢。
+本项目的 Python 核心解析与初期 EPUB 构建思路源自开源项目 **[ShqWW/lightnovel-download](https://github.com/ShqWW/lightnovel-download)**（原作者 `ShqWW` / 王老板）。在此基础上，本仓库进行了独立架构演进与大幅功能重构——新增了原生 macOS SwiftUI 客户端（**Shiori**）、`Wenku8Core` 多书源插件化与云端书架双向同步引擎、EPUB 3.0 组装与仿真阅读器，以及扩展的 CLI 与自动化 CI/CD 发版管线，特此向原项目致谢。
 
 ---
 

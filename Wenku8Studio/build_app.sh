@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-APP_NAME="ShioriStudio"
+APP_NAME="Shiori"
 SCHEME_NAME="Wenku8Studio"
 APP_BUNDLE="$ROOT_DIR/$APP_NAME.app"
 DERIVED_DIR="$SCRIPT_DIR/.build_xcode"
