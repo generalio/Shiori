@@ -5,7 +5,7 @@ import SwiftUI
 import WebKit
 import Wenku8Core
 
-public enum SidebarSection: String, CaseIterable, Identifiable, Codable {
+public enum SidebarSection: String, CaseIterable, Identifiable, Codable, Sendable {
     case discovery = "发现"
     case bookshelf = "书架与历史"
     case catalog = "目录与选章"
@@ -27,15 +27,38 @@ public enum SidebarSection: String, CaseIterable, Identifiable, Codable {
     }
 }
 
-public enum SettingsCategory: String, CaseIterable, Identifiable {
-    case general = "通用"
-    case appearance = "外观与主题"
-    case reader = "阅读器"
-    case account = "账号与云端"
-    case assembly = "EPUB 拼装"
-    case about = "关于"
+public enum SettingsCategory: Hashable, Identifiable, Sendable {
+    case general
+    case appearance
+    case reader
+    case account
+    case assembly
+    case about
+    case source(String)
 
-    public var id: String { rawValue }
+    public var id: String {
+        switch self {
+        case .general: return "general"
+        case .appearance: return "appearance"
+        case .reader: return "reader"
+        case .account: return "account"
+        case .assembly: return "assembly"
+        case .about: return "about"
+        case .source(let sid): return "source:\(sid)"
+        }
+    }
+
+    public var title: String {
+        switch self {
+        case .general: return "通用"
+        case .appearance: return "外观与主题"
+        case .reader: return "阅读器"
+        case .account: return "账号与云端"
+        case .assembly: return "EPUB 拼装"
+        case .about: return "关于"
+        case .source(let sid): return sid == "bilinovel" ? "哔哩轻小说" : (sid == "wenku8" ? "轻小说文库" : sid)
+        }
+    }
 
     public var subtitle: String {
         switch self {
@@ -45,6 +68,7 @@ public enum SettingsCategory: String, CaseIterable, Identifiable {
         case .account: return "Cookie 鉴权、自动保活刷新与云端书架"
         case .assembly: return "EPUB 规范、封面彩插、排版清洗与命名模板"
         case .about: return "版本信息、项目仓库、更新检查与默认重置"
+        case .source: return "独立配置该书源的启用状态、镜像域名、限速与会话凭据"
         }
     }
 
@@ -56,6 +80,7 @@ public enum SettingsCategory: String, CaseIterable, Identifiable {
         case .account: return "person.crop.circle.fill"
         case .assembly: return "shippingbox.fill"
         case .about: return "info.circle.fill"
+        case .source(let sid): return sid == "bilinovel" ? "sparkles.rectangle.stack.fill" : "books.vertical.fill"
         }
     }
 
@@ -67,11 +92,12 @@ public enum SettingsCategory: String, CaseIterable, Identifiable {
         case .account: return .green
         case .assembly: return .orange
         case .about: return .indigo
+        case .source(let sid): return sid == "bilinovel" ? .pink : .blue
         }
     }
 }
 
-public enum AppColorScheme: String, CaseIterable, Identifiable, Codable {
+public enum AppColorScheme: String, CaseIterable, Identifiable, Codable, Sendable {
     case system = "跟随系统"
     case light = "浅色"
     case dark = "深色"
@@ -87,7 +113,7 @@ public enum AppColorScheme: String, CaseIterable, Identifiable, Codable {
     }
 }
 
-public enum AppAccentTheme: String, CaseIterable, Identifiable, Codable {
+public enum AppAccentTheme: String, CaseIterable, Identifiable, Codable, Sendable {
     case system = "系统默认"
     case blue = "天空蓝"
     case indigo = "靛紫"
@@ -118,7 +144,7 @@ public enum AppAccentTheme: String, CaseIterable, Identifiable, Codable {
     }
 }
 
-public enum DiscoveryHomeChannel: String, CaseIterable, Identifiable, Codable {
+public enum DiscoveryHomeChannel: String, CaseIterable, Identifiable, Codable, Sendable {
     case allvisit = "总点击榜"
     case lastupdate = "最近更新"
     case allvote = "总推荐榜"
@@ -197,7 +223,7 @@ public extension ReaderFontFamily {
     }
 }
 
-private struct PersistedAppState: Codable {
+private struct PersistedAppState: Codable, Sendable {
     var bookmarks: [BookmarkEntry]
     var history: [BookmarkEntry]
     var outputs: [OutputArtifact]
@@ -239,10 +265,14 @@ private struct PersistedAppState: Codable {
     var compactBookCards: Bool?
     var autoCheckUpdatesOnLaunch: Bool?
     var showAdvancedSettings: Bool?
+    var sourceConfigs: [String: SourceRuntimeConfig]?
+    var selectedDiscoverySourceFilter: String?
+    var activeDiscoverySourceId: String?
 }
 
 public struct NavigationSnapshot: Equatable, Sendable {
     public let section: SidebarSection
+    public let sourceId: String?
     public let bookId: String?
     public let chapterId: String?
     public let discoveryTitle: String
@@ -329,9 +359,11 @@ public final class StudioViewModel: ObservableObject {
     private let speechSynthesizer = AVSpeechSynthesizer()
     private var speechDelegateProxy: SpeechSynthesizerDelegateProxy?
 
-    // Discovery & Search & Tags
+    // Discovery, Multi-Source Aggregation & Tags
     @Published public var searchQuery: String = ""
     @Published public var searchScope: SearchScope = .articleName
+    @Published public var selectedDiscoverySourceFilter: String? = nil // nil = 全部已启用渠道并发聚合
+    @Published public var activeDiscoverySourceId: String = "wenku8"
     @Published public var discoveryBooks: [AuthorBookItem] = []
     @Published public var discoveryTitle: String = "发现好书"
     @Published public var activeDiscoverySort: String = ""
@@ -340,6 +372,11 @@ public final class StudioViewModel: ObservableObject {
     @Published public var isLoadingDiscovery: Bool = false
     @Published public var discoveryNotice: String?
     @Published public var discoveryRequiresCookie: Bool = false
+    @Published public var discoveryChallengeSourceId: String? = nil
+    @Published public var sourceConfigs: [String: SourceRuntimeConfig] = [:]
+    @Published public var activeLoginSourceId: String = "wenku8"
+    @Published public var perSourceVerifyPassed: [String: Bool] = [:]
+    @Published public var perSourceVerifyMessage: [String: String] = [:]
     @Published public var tagGroups: [TagGroup] = []
     @Published public var isLoadingTags: Bool = false
     @Published public var selectedTag: String?
@@ -391,14 +428,19 @@ public final class StudioViewModel: ObservableObject {
     @Published public var outputDirectoryPath: String
 
     private enum DiscoverySource {
-        case list(title: String, path: String)
-        case search(query: String, scope: SearchScope)
-        case tag(name: String, sort: TagSortOption)
+        case list(sourceId: String, title: String, path: String)
+        case search(query: String, scope: SearchScope, sourceFilter: String?)
+        case tag(sourceId: String, name: String, sort: TagSortOption)
     }
     private var lastDiscoverySource: DiscoverySource?
 
+    public let sourceRegistry: SourceRegistry
+    public let searchEngine: AggregatedSearchEngine
     private let client: Wenku8Client
+    private let bilinovelPlugin: BilinovelPlugin
+    private let webKitFetchService = WebKitFetchService()
     private let epubBuilder = EPUBBuilder()
+    private let persistenceQueue = DispatchQueue(label: "com.lightnovel.ShioriStudio.persistence", qos: .utility)
     private var activeDownloadTask: Task<Void, Never>?
     private var cookieRefreshTask: Task<Void, Never>?
     private var foregroundObserver: NSObjectProtocol?
@@ -411,8 +453,15 @@ public final class StudioViewModel: ObservableObject {
         let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first?.path
             ?? (NSHomeDirectory() + "/Downloads")
         self.outputDirectoryPath = downloads
-        self.client = Wenku8Client(baseURL: "https://www.wenku8.cc", cookie: "", timeout: 15, politeDelaySeconds: 0.25)
+        let wClient = Wenku8Client(baseURL: "https://www.wenku8.cc", cookie: "", timeout: 15, politeDelaySeconds: 0.25)
+        let bPlugin = BilinovelPlugin(baseURL: "https://www.linovelib.com", cookie: "", timeout: 18, politeDelaySeconds: 1.5)
+        self.client = wClient
+        self.bilinovelPlugin = bPlugin
+        self.sourceRegistry = SourceRegistry.makeDefaultRegistry(wenku8Client: wClient, bilinovelPlugin: bPlugin)
+        self.searchEngine = AggregatedSearchEngine(registry: self.sourceRegistry)
+        self.sourceConfigs = Self.defaultSourceConfigs()
         loadPersistedState()
+        ensureDefaultSourceConfigsPopulated()
         selectedSection = startupSection
         foregroundObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification,
@@ -424,6 +473,7 @@ public final class StudioViewModel: ObservableObject {
             }
         }
         Task {
+            await sourceRegistry.setBrowserRuntime(webKitFetchService)
             await syncClientSettings()
             if !customCookie.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 await refreshCookieKeepAlive(silent: true)
@@ -434,6 +484,51 @@ public final class StudioViewModel: ObservableObject {
             if autoCheckUpdatesOnLaunch {
                 await checkForAppUpdates(silent: true)
             }
+        }
+    }
+
+    private static func defaultSourceConfigs() -> [String: SourceRuntimeConfig] {
+        [
+            "wenku8": SourceRuntimeConfig(
+                sourceId: "wenku8",
+                isEnabled: true,
+                baseURL: "https://www.wenku8.cc",
+                cookie: "",
+                requestTimeout: 15,
+                politeDelaySeconds: 0.25,
+                autoRefreshCookie: true,
+                refreshIntervalMinutes: 15
+            ),
+            "bilinovel": SourceRuntimeConfig(
+                sourceId: "bilinovel",
+                isEnabled: false,
+                baseURL: "https://www.linovelib.com",
+                cookie: "",
+                requestTimeout: 18,
+                politeDelaySeconds: 1.5,
+                autoRefreshCookie: false,
+                refreshIntervalMinutes: 30
+            ),
+        ]
+    }
+
+    private func ensureDefaultSourceConfigsPopulated() {
+        for (k, def) in Self.defaultSourceConfigs() {
+            if sourceConfigs[k] == nil {
+                sourceConfigs[k] = def
+            }
+        }
+        // Keep legacy wenku8 fields aligned bidirectionally
+        if var wCfg = sourceConfigs["wenku8"] {
+            if !baseURL.isEmpty { wCfg.baseURL = baseURL }
+            if !customCookie.isEmpty && wCfg.cookie.isEmpty { wCfg.cookie = customCookie }
+            wCfg.politeDelaySeconds = politeDelaySeconds
+            wCfg.autoRefreshCookie = autoRefreshCookieEnabled
+            wCfg.refreshIntervalMinutes = cookieRefreshIntervalMinutes
+            sourceConfigs["wenku8"] = wCfg
+        }
+        for (sid, cfg) in sourceConfigs {
+            sourceRegistry.setEnabled(cfg.isEnabled, for: sid)
         }
     }
 
@@ -566,13 +661,96 @@ public final class StudioViewModel: ObservableObject {
     }
 
     public func syncClientSettings() async {
-        await client.updateSettings(
-            baseURL: baseURL,
-            cookie: customCookie,
-            timeout: 15,
-            politeDelaySeconds: politeDelaySeconds
-        )
+        ensureDefaultSourceConfigsPopulated()
+        if var wCfg = sourceConfigs["wenku8"] {
+            wCfg.baseURL = baseURL
+            wCfg.cookie = customCookie
+            wCfg.politeDelaySeconds = politeDelaySeconds
+            wCfg.autoRefreshCookie = autoRefreshCookieEnabled
+            wCfg.refreshIntervalMinutes = cookieRefreshIntervalMinutes
+            sourceConfigs["wenku8"] = wCfg
+        }
+        await sourceRegistry.updateAllConfigs(sourceConfigs)
         savePersistedState()
+    }
+
+    public func sourceConfig(for sourceId: String) -> SourceRuntimeConfig {
+        sourceConfigs[sourceId] ?? Self.defaultSourceConfigs()[sourceId] ?? SourceRuntimeConfig(
+            sourceId: sourceId,
+            baseURL: sourceRegistry.plugin(for: sourceId)?.descriptor.defaultMirrors.first ?? ""
+        )
+    }
+
+    public func updateSourceConfig(_ config: SourceRuntimeConfig) {
+        sourceConfigs[config.sourceId] = config
+        sourceRegistry.setEnabled(config.isEnabled, for: config.sourceId)
+        if config.sourceId == "wenku8" {
+            baseURL = config.baseURL
+            customCookie = config.cookie
+            politeDelaySeconds = config.politeDelaySeconds
+            autoRefreshCookieEnabled = config.autoRefreshCookie
+            cookieRefreshIntervalMinutes = config.refreshIntervalMinutes
+        }
+        if !config.isEnabled {
+            if selectedDiscoverySourceFilter == config.sourceId {
+                selectedDiscoverySourceFilter = nil
+            }
+            if activeDiscoverySourceId == config.sourceId {
+                activeDiscoverySourceId = sourceRegistry.enabledPlugins().first?.descriptor.id ?? "wenku8"
+            }
+        }
+        Task { await syncClientSettings() }
+    }
+
+    public func sourceBadgeTitle(for sourceId: String) -> String {
+        sourceRegistry.plugin(for: sourceId)?.descriptor.shortBadge ?? sourceId
+    }
+
+    public func activeLoginURL() -> URL {
+        let cfg = sourceConfig(for: activeLoginSourceId)
+        if let auth = sourceRegistry.plugin(for: activeLoginSourceId) as? any AuthenticatedSource {
+            return auth.loginURL(baseURL: cfg.baseURL)
+        }
+        return URL(string: cfg.baseURL) ?? URL(string: "https://www.wenku8.cc/login.php")!
+    }
+
+    public func openWebLogin(for sourceId: String) {
+        activeLoginSourceId = sourceId
+        showWebLoginSheet = true
+    }
+
+    public func activeDiscoveryChannels() -> [DiscoveryChannel] {
+        let sid = selectedDiscoverySourceFilter ?? activeDiscoverySourceId
+        if let disc = sourceRegistry.plugin(for: sid) as? any DiscoveryCapableSource {
+            return disc.discoveryChannels()
+        }
+        return (client as any DiscoveryCapableSource).discoveryChannels()
+    }
+
+    public var currentBookSupportsReviews: Bool {
+        guard let sid = bookDetail?.sourceId else { return false }
+        return (sourceRegistry.plugin(for: sid) as? any ReviewCapableSource) != nil
+    }
+
+    public var currentBookSupportsCloudActions: Bool {
+        guard let sid = bookDetail?.sourceId else { return false }
+        return (sourceRegistry.plugin(for: sid) as? any CloudBookshelfCapableSource) != nil
+    }
+
+    public func testSourceSession(sourceId: String) {
+        let cfg = sourceConfig(for: sourceId)
+        if sourceId == "wenku8" {
+            testCookieValidity()
+            return
+        }
+        guard let auth = sourceRegistry.plugin(for: sourceId) as? any AuthenticatedSource else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            await self.syncClientSettings()
+            let res = await auth.verifySession(cookie: cfg.cookie, baseURL: cfg.baseURL)
+            self.perSourceVerifyPassed[sourceId] = res.passed
+            self.perSourceVerifyMessage[sourceId] = res.message
+        }
     }
 
     public func appendLog(_ line: String) {
@@ -587,15 +765,25 @@ public final class StudioViewModel: ObservableObject {
 
     // MARK: - Cover Thumbnail Cache
 
-    public func ensureCoverLoaded(urlString: String) {
+    public func ensureCoverLoaded(urlString: String, sourceId: String? = nil) {
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, coverImageCache[trimmed] == nil, !inflightCoverURLs.contains(trimmed) else { return }
         inflightCoverURLs.insert(trimmed)
 
+        let resolvedSourceId: String = {
+            if let sourceId { return sourceId }
+            if trimmed.contains("linovelib") || trimmed.contains("readpai") || trimmed.contains("bilinovel") {
+                return "bilinovel"
+            }
+            return "wenku8"
+        }()
+
         Task { [weak self] in
             guard let self else { return }
             defer { self.inflightCoverURLs.remove(trimmed) }
-            if let asset = try? await client.downloadSingleImage(urlString: trimmed, referer: baseURL),
+            let plugin = self.sourceRegistry.plugin(for: resolvedSourceId) ?? self.client
+            let cfg = self.sourceConfig(for: resolvedSourceId)
+            if let asset = try? await plugin.downloadImage(url: trimmed, referer: cfg.baseURL),
                let img = NSImage(data: asset.data) {
                 self.coverImageCache[trimmed] = img
             }
@@ -607,6 +795,7 @@ public final class StudioViewModel: ObservableObject {
     public func currentNavigationSnapshot() -> NavigationSnapshot {
         NavigationSnapshot(
             section: selectedSection,
+            sourceId: bookDetail?.sourceId,
             bookId: bookDetail?.bookId,
             chapterId: previewChapter?.chapter.id,
             discoveryTitle: discoveryTitle,
@@ -682,13 +871,18 @@ public final class StudioViewModel: ObservableObject {
             }
 
         case .catalog:
-            if let targetBookId = target.bookId, bookDetail?.bookId != targetBookId {
-                loadBook(inputOverride: targetBookId, recordNavigation: false)
+            if let targetBookId = target.bookId {
+                let targetSource = target.sourceId ?? "wenku8"
+                if bookDetail?.bookId != targetBookId || bookDetail?.sourceId != targetSource {
+                    loadBook(inputOverride: targetBookId, sourceIdOverride: targetSource, recordNavigation: false)
+                }
             }
 
         case .reader:
-            if let targetBookId = target.bookId, bookDetail?.bookId != targetBookId,
-               let cachedBook = bookDetailCache[targetBookId] {
+            let targetSource = target.sourceId ?? "wenku8"
+            if let targetBookId = target.bookId,
+               (bookDetail?.bookId != targetBookId || bookDetail?.sourceId != targetSource),
+               let cachedBook = bookDetailCache[ScopedBookID(sourceId: targetSource, bookId: targetBookId).rawKey] ?? bookDetailCache[targetBookId] {
                 applyLoadedBookDetail(cachedBook, switchToCatalog: false)
             }
             if let chapId = target.chapterId, previewChapter?.chapter.id != chapId,
@@ -707,8 +901,8 @@ public final class StudioViewModel: ObservableObject {
             navigateToSection(.discovery)
             return
         }
-        if !Wenku8Client.extractBookId(from: trimmed).isEmpty {
-            loadBook(inputOverride: trimmed)
+        if let routed = sourceRegistry.routeBookInput(trimmed, preferredSourceId: selectedDiscoverySourceFilter ?? activeDiscoverySourceId) {
+            loadBook(inputOverride: trimmed, sourceIdOverride: routed.plugin.descriptor.id)
         } else {
             pushNavigationHistorySnapshot()
             searchQuery = trimmed
@@ -722,26 +916,27 @@ public final class StudioViewModel: ObservableObject {
         switch selectedSection {
         case .discovery:
             if !activeDiscoverySort.isEmpty {
-                loadDiscoveryList(title: discoveryTitle, path: activeDiscoverySort, page: discoveryPage)
+                loadDiscoveryList(title: discoveryTitle, path: activeDiscoverySort, sourceId: activeDiscoverySourceId, page: discoveryPage)
             } else if let tag = selectedTag {
                 loadBooksByTag(tag, sort: tagSortOption, page: discoveryPage)
             } else if !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 performDiscoverySearch(page: discoveryPage)
-            } else {
-                loadDiscoveryList(title: "总点击榜", path: "/modules/article/toplist.php?sort=allvisit", page: 1)
+            } else if let firstChannel = activeDiscoveryChannels().first {
+                loadDiscoveryList(title: firstChannel.title, path: firstChannel.path, sourceId: firstChannel.sourceId, page: 1)
             }
         case .bookshelf:
             syncBookshelfBidirectionally(silent: false)
         case .catalog:
-            if let id = bookDetail?.bookId {
-                bookDetailCache.removeValue(forKey: id)
-                loadBook(inputOverride: id, recordNavigation: false)
+            if let detail = bookDetail {
+                bookDetailCache.removeValue(forKey: detail.scopedId)
+                loadBook(inputOverride: detail.bookId, sourceIdOverride: detail.sourceId, recordNavigation: false)
             } else if !bookInput.isEmpty {
                 loadBook(recordNavigation: false)
             }
         case .reader:
             if let chap = previewChapter?.chapter {
-                chapterContentCache.removeValue(forKey: chap.id)
+                let cacheKey = "\(chap.sourceId):\(bookDetail?.bookId ?? ""):\(chap.id)"
+                chapterContentCache.removeValue(forKey: cacheKey)
                 openChapterInReader(chap, startAtLastPage: false, recordNavigation: false)
             }
         case .tasks:
@@ -755,7 +950,10 @@ public final class StudioViewModel: ObservableObject {
 
     private func applyLoadedBookDetail(_ detail: BookDetail, switchToCatalog: Bool) {
         bookDetail = detail
-        bookDetailCache[detail.bookId] = detail
+        bookDetailCache[detail.scopedId] = detail
+        if detail.sourceId == "wenku8" {
+            bookDetailCache[detail.bookId] = detail
+        }
         if switchToCatalog {
             selectedSection = .catalog
         }
@@ -770,15 +968,21 @@ public final class StudioViewModel: ObservableObject {
         }
     }
 
-    public func loadBook(inputOverride: String? = nil, recordNavigation: Bool = true) {
+    public func loadBook(inputOverride: String? = nil, sourceIdOverride: String? = nil, recordNavigation: Bool = true) {
         let query = (inputOverride ?? bookInput).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else {
             errorBanner = "请输入书号或书籍网址"
             return
         }
-        let targetId = Wenku8Client.extractBookId(from: query)
+
+        let preferredSource = sourceIdOverride ?? selectedDiscoverySourceFilter ?? activeDiscoverySourceId
+        let routed = sourceRegistry.routeBookInput(query, preferredSourceId: preferredSource)
+        let targetPlugin = routed?.plugin ?? sourceRegistry.plugin(for: preferredSource) ?? client
+        let targetSourceId = targetPlugin.descriptor.id
+        let targetBookId = routed?.bookId ?? query
+
         if recordNavigation {
-            let alreadyViewing = (selectedSection == .catalog && !targetId.isEmpty && bookDetail?.bookId == targetId)
+            let alreadyViewing = (selectedSection == .catalog && bookDetail?.bookId == targetBookId && bookDetail?.sourceId == targetSourceId)
             if !alreadyViewing {
                 pushNavigationHistorySnapshot()
             }
@@ -787,11 +991,12 @@ public final class StudioViewModel: ObservableObject {
         errorBanner = nil
         statusBanner = nil
 
-        if !targetId.isEmpty, let cached = bookDetailCache[targetId] {
+        let scopedKey = ScopedBookID(sourceId: targetSourceId, bookId: targetBookId).rawKey
+        if let cached = bookDetailCache[scopedKey] {
             applyLoadedBookDetail(cached, switchToCatalog: true)
             recordHistory(detail: cached)
             if coverPreviewImage == nil && !cached.coverURL.isEmpty {
-                ensureCoverLoaded(urlString: cached.coverURL)
+                ensureCoverLoaded(urlString: cached.coverURL, sourceId: cached.sourceId)
             }
             return
         }
@@ -800,13 +1005,13 @@ public final class StudioViewModel: ObservableObject {
         selectedReview = nil
         reviewPosts = []
         reviews = []
-        appendLog("开始拉取书籍详情：\(query)")
+        appendLog("开始拉取【\(targetPlugin.descriptor.displayName)】书籍详情：\(query)")
 
         Task { [weak self] in
             guard let self else { return }
             await syncClientSettings()
             do {
-                let detail = try await client.fetchBookDetail(rawInput: query) { [weak self] msg in
+                let detail = try await targetPlugin.fetchBookDetail(bookIdOrURL: query) { [weak self] msg in
                     Task { @MainActor in
                         self?.appendLog(msg)
                     }
@@ -822,7 +1027,7 @@ public final class StudioViewModel: ObservableObject {
                         loadedCover = existing
                     } else {
                         do {
-                            let coverAsset = try await client.downloadSingleImage(urlString: detail.coverURL, referer: detail.baseURL)
+                            let coverAsset = try await targetPlugin.downloadImage(url: detail.coverURL, referer: detail.baseURL)
                             loadedCover = NSImage(data: coverAsset.data)
                         } catch {
                             self.appendLog("主页封面加载失败（\(detail.coverURL)）：\(error.localizedDescription)")
@@ -831,9 +1036,9 @@ public final class StudioViewModel: ObservableObject {
                 }
                 if loadedCover == nil,
                    let firstIllusChap = detail.volumes.first?.chapters.first(where: { $0.isIllustrationChapter }) {
-                    if let illusContent = try? await client.fetchChapterContent(chapter: firstIllusChap, baseURL: detail.baseURL),
+                    if let illusContent = try? await targetPlugin.fetchChapterContent(chapter: firstIllusChap, book: detail),
                        let firstImgURL = illusContent.imageURLs.first,
-                       let illusAsset = try? await client.downloadSingleImage(urlString: firstImgURL, referer: detail.baseURL) {
+                       let illusAsset = try? await targetPlugin.downloadImage(url: firstImgURL, referer: detail.baseURL) {
                         loadedCover = NSImage(data: illusAsset.data)
                     }
                 }
@@ -841,6 +1046,10 @@ public final class StudioViewModel: ObservableObject {
                 if let loadedCover, !detail.coverURL.isEmpty {
                     self.coverImageCache[detail.coverURL] = loadedCover
                 }
+            } catch let SourceError.challengeRequired(sourceId, _, msg) {
+                self.errorBanner = msg
+                self.activeLoginSourceId = sourceId
+                self.appendLog("访问受限（\(sourceId)）：\(msg)")
             } catch {
                 self.errorBanner = error.localizedDescription
                 self.appendLog("拉取失败：\(error.localizedDescription)")
@@ -952,7 +1161,10 @@ public final class StudioViewModel: ObservableObject {
         errorBanner = nil
         readerStartAtEndOnOpen = startAtLastPage
 
-        if let cached = chapterContentCache[chapter.id] {
+        let bookSourceId = bookDetail?.sourceId ?? chapter.sourceId
+        let cacheKey = "\(bookSourceId):\(bookDetail?.bookId ?? ""):\(chapter.id)"
+
+        if let cached = chapterContentCache[cacheKey] ?? chapterContentCache[chapter.id] {
             previewChapter = cached
             var imgs: [String: NSImage] = [:]
             for url in cached.imageURLs {
@@ -962,8 +1174,8 @@ public final class StudioViewModel: ObservableObject {
             }
             if imgs.count == cached.imageURLs.count {
                 previewImages = imgs
-                if let bookId = bookDetail?.bookId {
-                    lastReadChapterByBook[bookId] = chapter.id
+                if let detail = bookDetail {
+                    lastReadChapterByBook[detail.scopedId] = chapter.id
                     savePersistedState()
                 }
                 return
@@ -973,21 +1185,44 @@ public final class StudioViewModel: ObservableObject {
         isLoadingPreview = true
         previewImages = [:]
 
+        let activeBook = bookDetail
+        let plugin = sourceRegistry.plugin(for: bookSourceId) ?? client
+
         Task { [weak self] in
             guard let self else { return }
             do {
-                let content = try await client.fetchChapterContent(chapter: chapter, baseURL: bookDetail?.baseURL)
-                self.chapterContentCache[chapter.id] = content
+                let placeholderBook = activeBook ?? BookDetail(
+                    bookId: "",
+                    sourceId: bookSourceId,
+                    baseURL: self.sourceConfig(for: bookSourceId).baseURL,
+                    title: "",
+                    author: "",
+                    publisher: "",
+                    status: "",
+                    lastUpdated: "",
+                    wordCount: "",
+                    popularity: "",
+                    latestChapter: "",
+                    tags: [],
+                    description: "",
+                    coverURL: "",
+                    catalogURL: "",
+                    volumes: [],
+                    recommendations: []
+                )
+                let content = try await plugin.fetchChapterContent(chapter: chapter, book: placeholderBook)
+                self.chapterContentCache[cacheKey] = content
                 self.previewChapter = content
-                if let bookId = self.bookDetail?.bookId {
-                    self.lastReadChapterByBook[bookId] = chapter.id
+                if let detail = activeBook {
+                    self.lastReadChapterByBook[detail.scopedId] = chapter.id
                     self.savePersistedState()
                 }
                 if !content.imageURLs.isEmpty {
-                    let downloaded = try await client.downloadImages(
+                    let downloaded = try await plugin.downloadImages(
                         urls: content.imageURLs,
-                        referer: bookDetail?.baseURL,
-                        maxConcurrency: maxConcurrency
+                        referer: placeholderBook.baseURL,
+                        maxConcurrency: maxConcurrency,
+                        onProgress: nil
                     )
                     var imgs: [String: NSImage] = [:]
                     for (url, asset) in downloaded {
@@ -1017,11 +1252,13 @@ public final class StudioViewModel: ObservableObject {
         excerpt: String
     ) {
         let bookId = bookDetail?.bookId ?? "unknown"
-        if let idx = readerBookmarks.firstIndex(where: { $0.chapterId == chapter.id && $0.pageIndex == pageIndex }) {
+        let sourceId = bookDetail?.sourceId ?? chapter.sourceId
+        if let idx = readerBookmarks.firstIndex(where: { $0.chapterId == chapter.id && $0.pageIndex == pageIndex && $0.bookId == bookId && $0.sourceId == sourceId }) {
             readerBookmarks.remove(at: idx)
             statusBanner = "已移除页内书签"
         } else {
             let note = ReaderBookmarkNote(
+                sourceId: sourceId,
                 bookId: bookId,
                 chapterId: chapter.id,
                 chapterTitle: chapter.title,
@@ -1045,8 +1282,8 @@ public final class StudioViewModel: ObservableObject {
     }
 
     public func readerBookmarksForCurrentBook() -> [ReaderBookmarkNote] {
-        guard let bookId = bookDetail?.bookId else { return readerBookmarks }
-        return readerBookmarks.filter { $0.bookId == bookId }
+        guard let detail = bookDetail else { return readerBookmarks }
+        return readerBookmarks.filter { $0.bookId == detail.bookId && $0.sourceId == detail.sourceId }
     }
 
     public func toggleSpeechForCurrentChapter() {
@@ -1091,8 +1328,8 @@ public final class StudioViewModel: ObservableObject {
     public func openLastReadOrFirstChapter() {
         guard let detail = bookDetail else { return }
         let flat = detail.volumes.flatMap(\.chapters)
-        if let savedId = lastReadChapterByBook[detail.bookId],
-           let found = flat.first(where: { $0.id == savedId }) {
+        let savedId = lastReadChapterByBook[detail.scopedId] ?? (detail.sourceId == "wenku8" ? lastReadChapterByBook[detail.bookId] : nil)
+        if let savedId, let found = flat.first(where: { $0.id == savedId }) {
             openChapterInReader(found)
         } else if let first = flat.first(where: { !$0.isIllustrationChapter }) ?? flat.first {
             openChapterInReader(first)
@@ -1111,7 +1348,18 @@ public final class StudioViewModel: ObservableObject {
     // MARK: - Reviews Inspector (in Catalog)
 
     public func openReviewsInspectorForCurrentBook() {
-        guard let detail = bookDetail else { return }
+        toggleReviewsInspectorForCurrentBook()
+    }
+
+    public func toggleReviewsInspectorForCurrentBook() {
+        if showReviewsInspector {
+            showReviewsInspector = false
+            return
+        }
+        guard let detail = bookDetail,
+              let reviewSource = sourceRegistry.plugin(for: detail.sourceId) as? any ReviewCapableSource else {
+            return
+        }
         showReviewsInspector = true
         if !reviews.isEmpty { return }
         isLoadingReviews = true
@@ -1119,7 +1367,7 @@ public final class StudioViewModel: ObservableObject {
         Task { [weak self] in
             guard let self else { return }
             do {
-                let list = try await client.fetchReviews(bookId: detail.bookId, baseURL: detail.baseURL)
+                let list = try await reviewSource.fetchReviews(bookId: detail.bookId, baseURL: detail.baseURL)
                 self.reviews = list
             } catch {
                 self.errorBanner = "拉取书评失败：\(error.localizedDescription)"
@@ -1129,6 +1377,10 @@ public final class StudioViewModel: ObservableObject {
     }
 
     public func openReviewThread(_ review: BookReview) {
+        guard let detail = bookDetail,
+              let reviewSource = sourceRegistry.plugin(for: detail.sourceId) as? any ReviewCapableSource else {
+            return
+        }
         selectedReview = review
         reviewPosts = []
         isLoadingReviewPosts = true
@@ -1136,9 +1388,9 @@ public final class StudioViewModel: ObservableObject {
         Task { [weak self] in
             guard let self else { return }
             do {
-                let posts = try await client.fetchReviewThread(
-                    reviewURL: review.url,
-                    baseURL: bookDetail?.baseURL ?? baseURL
+                let posts = try await reviewSource.fetchReviewThread(
+                    review: review,
+                    baseURL: detail.baseURL
                 )
                 self.reviewPosts = posts
             } catch {
@@ -1150,13 +1402,25 @@ public final class StudioViewModel: ObservableObject {
 
     // MARK: - Discovery, Search & Tags
 
-    public func loadAuthorWorks(author: String) {
+    public func loadAuthorWorks(author: String, sourceId: String? = nil) {
         guard !author.isEmpty else { return }
         pushNavigationHistorySnapshot()
         searchQuery = author
         searchScope = .author
+        if let sourceId {
+            selectedDiscoverySourceFilter = sourceId
+            activeDiscoverySourceId = sourceId
+        }
         selectedSection = .discovery
         performDiscoverySearch(page: 1)
+    }
+
+    public func setDiscoverySourceFilter(_ sourceId: String?) {
+        selectedDiscoverySourceFilter = sourceId
+        if let sourceId {
+            activeDiscoverySourceId = sourceId
+        }
+        savePersistedState()
     }
 
     public func performDiscoverySearch(page: Int = 1) {
@@ -1165,55 +1429,84 @@ public final class StudioViewModel: ObservableObject {
         isLoadingDiscovery = true
         discoveryNotice = nil
         discoveryRequiresCookie = false
+        discoveryChallengeSourceId = nil
         activeDiscoverySort = ""
         selectedTag = nil
-        discoveryTitle = "搜索「\(q)」"
-        lastDiscoverySource = .search(query: q, scope: searchScope)
+        if let filter = selectedDiscoverySourceFilter,
+           let name = sourceRegistry.plugin(for: filter)?.descriptor.shortBadge {
+            discoveryTitle = "搜索「\(q)」· \(name)"
+        } else {
+            discoveryTitle = "全渠道聚合搜索「\(q)」"
+        }
+        lastDiscoverySource = .search(query: q, scope: searchScope, sourceFilter: selectedDiscoverySourceFilter)
 
         Task { [weak self] in
             guard let self else { return }
             await syncClientSettings()
-            do {
-                let res = try await client.searchBooksPaged(query: q, scope: searchScope, page: page, baseURL: baseURL)
-                self.discoveryBooks = res.items
-                self.discoveryPage = res.currentPage
-                self.discoveryTotalPages = res.totalPages
-                if res.items.isEmpty {
-                    self.discoveryNotice = "未找到与「\(q)」相关的作品。"
-                }
-            } catch let Wenku8Error.loginRequired(msg) {
-                self.discoveryNotice = msg
+            let res = await searchEngine.search(
+                query: q,
+                scope: searchScope,
+                page: page,
+                sourceId: selectedDiscoverySourceFilter
+            )
+            self.discoveryBooks = res.items
+            self.discoveryPage = page
+            self.discoveryTotalPages = res.totalPages
+            if let challengeNotice = res.notices.first(where: { $0.requiresChallenge }) {
                 self.discoveryRequiresCookie = true
-            } catch {
-                self.discoveryNotice = error.localizedDescription
+                self.discoveryChallengeSourceId = challengeNotice.sourceId
+            }
+            if !res.notices.isEmpty {
+                let noticeSummary = res.notices.map { "[\($0.sourceName)] \($0.message)" }.joined(separator: "；")
+                self.discoveryNotice = noticeSummary
+            } else if res.items.isEmpty {
+                self.discoveryNotice = "未找到与「\(q)」相关的作品。"
             }
             self.isLoadingDiscovery = false
         }
     }
 
-    public func loadDiscoveryList(title: String, path: String, page: Int = 1) {
+    public func loadDiscoveryList(title: String, path: String, sourceId: String? = nil, page: Int = 1) {
+        let sid = sourceId ?? selectedDiscoverySourceFilter ?? activeDiscoverySourceId
+        activeDiscoverySourceId = sid
         isLoadingDiscovery = true
         discoveryNotice = nil
         discoveryRequiresCookie = false
+        discoveryChallengeSourceId = nil
         activeDiscoverySort = path
         selectedTag = nil
         discoveryTitle = title
-        lastDiscoverySource = .list(title: title, path: path)
+        lastDiscoverySource = .list(sourceId: sid, title: title, path: path)
 
         Task { [weak self] in
             guard let self else { return }
             await syncClientSettings()
+            guard let disc = sourceRegistry.plugin(for: sid) as? any DiscoveryCapableSource else {
+                self.discoveryNotice = "当前书源暂不支持发现榜单。"
+                self.isLoadingDiscovery = false
+                return
+            }
+            let channel = DiscoveryChannel(sourceId: sid, title: title, path: path, icon: "sparkles")
             do {
-                let res = try await client.fetchDiscoveryBooksPaged(listPath: path, page: page, baseURL: baseURL)
+                let res = try await disc.fetchChannelBooks(channel: channel, page: page)
                 self.discoveryBooks = res.items
                 self.discoveryPage = res.currentPage
                 self.discoveryTotalPages = res.totalPages
                 if res.items.isEmpty {
                     self.discoveryNotice = "当前分类暂无更多数据。"
                 }
+            } catch SourceError.challengeRequired(let errSid, _, let msg) {
+                self.discoveryNotice = msg
+                self.discoveryRequiresCookie = true
+                self.discoveryChallengeSourceId = errSid
+            } catch SourceError.loginRequired(let errSid, let msg) {
+                self.discoveryNotice = msg
+                self.discoveryRequiresCookie = true
+                self.discoveryChallengeSourceId = errSid
             } catch let Wenku8Error.loginRequired(msg) {
                 self.discoveryNotice = msg
                 self.discoveryRequiresCookie = true
+                self.discoveryChallengeSourceId = sid
             } catch {
                 self.discoveryNotice = error.localizedDescription
             }
@@ -1223,16 +1516,30 @@ public final class StudioViewModel: ObservableObject {
 
     public func loadTagGroups() {
         guard !isLoadingTags else { return }
+        let sid = selectedDiscoverySourceFilter ?? activeDiscoverySourceId
+        guard let disc = sourceRegistry.plugin(for: sid) as? any DiscoveryCapableSource else {
+            tagGroups = []
+            return
+        }
         isLoadingTags = true
         Task { [weak self] in
             guard let self else { return }
             await syncClientSettings()
             do {
-                let groups = try await client.fetchTagGroups(baseURL: baseURL)
+                let groups = try await disc.fetchTagGroups()
                 self.tagGroups = groups
+            } catch SourceError.challengeRequired(let errSid, _, let msg) {
+                self.discoveryNotice = msg
+                self.discoveryRequiresCookie = true
+                self.discoveryChallengeSourceId = errSid
+            } catch SourceError.loginRequired(let errSid, let msg) {
+                self.discoveryNotice = msg
+                self.discoveryRequiresCookie = true
+                self.discoveryChallengeSourceId = errSid
             } catch let Wenku8Error.loginRequired(msg) {
                 self.discoveryNotice = msg
                 self.discoveryRequiresCookie = true
+                self.discoveryChallengeSourceId = sid
             } catch {
                 self.discoveryNotice = "加载标签云失败：\(error.localizedDescription)"
             }
@@ -1241,6 +1548,7 @@ public final class StudioViewModel: ObservableObject {
     }
 
     public func loadBooksByTag(_ tag: String, sort: TagSortOption? = nil, page: Int = 1) {
+        let sid = selectedDiscoverySourceFilter ?? activeDiscoverySourceId
         let activeSort = sort ?? tagSortOption
         tagSortOption = activeSort
         selectedTag = tag
@@ -1248,23 +1556,38 @@ public final class StudioViewModel: ObservableObject {
         isLoadingDiscovery = true
         discoveryNotice = nil
         discoveryRequiresCookie = false
+        discoveryChallengeSourceId = nil
         discoveryTitle = "标签「\(tag)」· \(activeSort.displayName)"
-        lastDiscoverySource = .tag(name: tag, sort: activeSort)
+        lastDiscoverySource = .tag(sourceId: sid, name: tag, sort: activeSort)
 
         Task { [weak self] in
             guard let self else { return }
             await syncClientSettings()
+            guard let disc = sourceRegistry.plugin(for: sid) as? any DiscoveryCapableSource else {
+                self.discoveryNotice = "当前书源暂不支持标签筛选。"
+                self.isLoadingDiscovery = false
+                return
+            }
             do {
-                let res = try await client.fetchBooksByTag(tag: tag, sort: activeSort, page: page, baseURL: baseURL)
+                let res = try await disc.fetchBooksByTag(tag: tag, sort: activeSort, page: page)
                 self.discoveryBooks = res.items
                 self.discoveryPage = res.currentPage
                 self.discoveryTotalPages = res.totalPages
                 if res.items.isEmpty {
                     self.discoveryNotice = "标签「\(tag)」下暂无符合条件的作品。"
                 }
+            } catch SourceError.challengeRequired(let errSid, _, let msg) {
+                self.discoveryNotice = msg
+                self.discoveryRequiresCookie = true
+                self.discoveryChallengeSourceId = errSid
+            } catch SourceError.loginRequired(let errSid, let msg) {
+                self.discoveryNotice = msg
+                self.discoveryRequiresCookie = true
+                self.discoveryChallengeSourceId = errSid
             } catch let Wenku8Error.loginRequired(msg) {
                 self.discoveryNotice = msg
                 self.discoveryRequiresCookie = true
+                self.discoveryChallengeSourceId = sid
             } catch {
                 self.discoveryNotice = error.localizedDescription
             }
@@ -1276,13 +1599,15 @@ public final class StudioViewModel: ObservableObject {
         let clamped = max(1, min(discoveryTotalPages, targetPage))
         guard clamped != discoveryPage, let source = lastDiscoverySource else { return }
         switch source {
-        case .list(let title, let path):
-            loadDiscoveryList(title: title, path: path, page: clamped)
-        case .search(let query, let scope):
+        case .list(let sourceId, let title, let path):
+            loadDiscoveryList(title: title, path: path, sourceId: sourceId, page: clamped)
+        case .search(let query, let scope, let sourceFilter):
             searchQuery = query
             searchScope = scope
+            selectedDiscoverySourceFilter = sourceFilter
             performDiscoverySearch(page: clamped)
-        case .tag(let name, let sort):
+        case .tag(let sourceId, let name, let sort):
+            activeDiscoverySourceId = sourceId
             loadBooksByTag(name, sort: sort, page: clamped)
         }
     }
@@ -1316,8 +1641,11 @@ public final class StudioViewModel: ObservableObject {
                 }
                 self.cloudCapacityTip = firstPull.capacityTip
 
+                let wenku8Local = self.bookmarks.filter { $0.sourceId == "wenku8" }
+                let otherSourceBookmarks = self.bookmarks.filter { $0.sourceId != "wenku8" }
+
                 let initialPlan = BookmarkEntry.reconcileWithCloud(
-                    local: self.bookmarks,
+                    local: wenku8Local,
                     cloud: firstPull.items,
                     previouslyKnownCloudIds: self.knownCloudBookIds,
                     pendingCloudDeleteIds: self.pendingCloudDeleteIds
@@ -1356,7 +1684,7 @@ public final class StudioViewModel: ObservableObject {
                     pendingCloudDeleteIds: self.pendingCloudDeleteIds
                 )
 
-                self.bookmarks = finalPlan.mergedBookmarks
+                self.bookmarks = finalPlan.mergedBookmarks + otherSourceBookmarks
                 self.knownCloudBookIds = finalPlan.knownCloudBookIds
                 self.lastBookshelfSyncAt = Date()
                 self.cookieVerifyPassed = true
@@ -1384,7 +1712,7 @@ public final class StudioViewModel: ObservableObject {
     }
 
     public func moveBookmarkToCloudGroup(_ entry: BookmarkEntry, toClassId: String) {
-        guard !entry.cloudRecordId.isEmpty, entry.cloudGroupId != toClassId else { return }
+        guard entry.sourceId == "wenku8", !entry.cloudRecordId.isEmpty, entry.cloudGroupId != toClassId else { return }
         Task { [weak self] in
             guard let self else { return }
             await syncClientSettings()
@@ -1395,7 +1723,7 @@ public final class StudioViewModel: ObservableObject {
                     toClassId: toClassId,
                     baseURL: baseURL
                 )
-                if let idx = self.bookmarks.firstIndex(where: { $0.id == entry.id }) {
+                if let idx = self.bookmarks.firstIndex(where: { $0.id == entry.id && $0.sourceId == entry.sourceId }) {
                     self.bookmarks[idx].cloudGroupId = toClassId
                     self.savePersistedState()
                 }
@@ -1408,7 +1736,7 @@ public final class StudioViewModel: ObservableObject {
 
     public func openBookmarkChapter(_ entry: BookmarkEntry) {
         guard !entry.cloudChapterId.isEmpty else {
-            loadBook(inputOverride: entry.id)
+            loadBook(inputOverride: entry.id, sourceIdOverride: entry.sourceId)
             return
         }
         bookInput = entry.id
@@ -1419,9 +1747,10 @@ public final class StudioViewModel: ObservableObject {
             guard let self else { return }
             await syncClientSettings()
             do {
-                let detail = try await client.fetchBookDetail(rawInput: entry.id)
+                let plugin = self.sourceRegistry.plugin(for: entry.sourceId) ?? self.client
+                let detail = try await plugin.fetchBookDetail(bookIdOrURL: entry.id, onProgress: nil)
                 self.bookDetail = detail
-                self.bookDetailCache[detail.bookId] = detail
+                self.bookDetailCache[detail.scopedId] = detail
                 self.recordHistory(detail: detail)
                 if let match = detail.volumes.flatMap(\.chapters).first(where: { $0.url.contains("/\(entry.cloudChapterId).htm") }) {
                     self.openChapterInReader(match)
@@ -1436,7 +1765,10 @@ public final class StudioViewModel: ObservableObject {
     }
 
     public func voteCurrentBook() {
-        guard let detail = bookDetail, !isVotingBook else { return }
+        guard let detail = bookDetail, !isVotingBook,
+              let cloudSource = sourceRegistry.plugin(for: detail.sourceId) as? any CloudBookshelfCapableSource else {
+            return
+        }
         isVotingBook = true
         errorBanner = nil
         statusBanner = nil
@@ -1445,7 +1777,7 @@ public final class StudioViewModel: ObservableObject {
             guard let self else { return }
             await syncClientSettings()
             do {
-                let msg = try await client.voteBook(bookId: detail.bookId, baseURL: detail.baseURL)
+                let msg = try await cloudSource.voteBook(bookId: detail.bookId, baseURL: detail.baseURL)
                 await syncRefreshedCookieFromClient()
                 self.statusBanner = "《\(detail.title)》：\(msg)"
                 self.appendLog("推荐投票《\(detail.title)》：\(msg)")
@@ -1458,13 +1790,14 @@ public final class StudioViewModel: ObservableObject {
 
     // MARK: - Bookmarks & History
 
-    public func isBookmarked(_ bookId: String) -> Bool {
-        bookmarks.contains { $0.id == bookId }
+    public func isBookmarked(_ bookId: String, sourceId: String = "wenku8") -> Bool {
+        bookmarks.contains { $0.id == bookId && $0.sourceId == sourceId }
     }
 
     public func toggleBookmark(_ detail: BookDetail) {
         let entry = BookmarkEntry(
             id: detail.bookId,
+            sourceId: detail.sourceId,
             title: detail.title,
             author: detail.author,
             coverURL: detail.coverURL,
@@ -1482,6 +1815,7 @@ public final class StudioViewModel: ObservableObject {
     public func toggleBookmarkFromAuthorItem(_ item: AuthorBookItem) {
         let entry = BookmarkEntry(
             id: item.id,
+            sourceId: item.sourceId,
             title: item.title,
             author: item.author,
             coverURL: item.coverURL,
@@ -1497,19 +1831,27 @@ public final class StudioViewModel: ObservableObject {
     }
 
     public func toggleBookmarkFromEntry(_ entry: BookmarkEntry) {
-        if isBookmarked(entry.id) {
-            removeBookmark(id: entry.id)
+        if isBookmarked(entry.id, sourceId: entry.sourceId) {
+            removeBookmark(id: entry.id, sourceId: entry.sourceId)
         } else {
             addBookmarkUnified(entry)
         }
     }
 
     private func addBookmarkUnified(_ entry: BookmarkEntry) {
-        pendingCloudDeleteIds.remove(entry.id)
-        if !bookmarks.contains(where: { $0.id == entry.id }) {
+        let supportsCloud = (sourceRegistry.plugin(for: entry.sourceId) as? any CloudBookshelfCapableSource) != nil
+        if supportsCloud {
+            pendingCloudDeleteIds.remove(entry.id)
+        }
+        if !bookmarks.contains(where: { $0.id == entry.id && $0.sourceId == entry.sourceId }) {
             bookmarks.insert(entry, at: 0)
         }
         savePersistedState()
+
+        guard supportsCloud else {
+            statusBanner = "已加入本地书架：\(entry.title)"
+            return
+        }
 
         guard isCloudSessionAvailable else {
             statusBanner = "未登录账号，已暂存到本地书架（登录后自动同步至云端）"
@@ -1522,7 +1864,7 @@ public final class StudioViewModel: ObservableObject {
             do {
                 let msg = try await client.addToCloudBookcase(bookId: entry.id, baseURL: baseURL)
                 await syncRefreshedCookieFromClient()
-                if let idx = self.bookmarks.firstIndex(where: { $0.id == entry.id }) {
+                if let idx = self.bookmarks.firstIndex(where: { $0.id == entry.id && $0.sourceId == entry.sourceId }) {
                     self.bookmarks[idx].hasSyncedToCloud = true
                 }
                 self.knownCloudBookIds.insert(entry.id)
@@ -1538,9 +1880,15 @@ public final class StudioViewModel: ObservableObject {
         }
     }
 
-    public func removeBookmark(id: String) {
-        let existing = bookmarks.first(where: { $0.id == id })
-        bookmarks.removeAll { $0.id == id }
+    public func removeBookmark(id: String, sourceId: String = "wenku8") {
+        let existing = bookmarks.first(where: { $0.id == id && $0.sourceId == sourceId })
+        bookmarks.removeAll { $0.id == id && $0.sourceId == sourceId }
+
+        let supportsCloud = (sourceRegistry.plugin(for: sourceId) as? any CloudBookshelfCapableSource) != nil
+        guard supportsCloud else {
+            savePersistedState()
+            return
+        }
 
         let wasSynced = (existing?.hasSyncedToCloud == true) || knownCloudBookIds.contains(id)
         let recordId = existing?.cloudRecordId ?? ""
@@ -1583,8 +1931,8 @@ public final class StudioViewModel: ObservableObject {
         }
     }
 
-    public func removeHistoryItem(id: String) {
-        history.removeAll { $0.id == id }
+    public func removeHistoryItem(id: String, sourceId: String = "wenku8") {
+        history.removeAll { $0.id == id && $0.sourceId == sourceId }
         savePersistedState()
     }
 
@@ -1600,6 +1948,10 @@ public final class StudioViewModel: ObservableObject {
     public func testCookieValidity() {
         let norm = Wenku8Client.normalizeCookie(customCookie)
         customCookie = norm
+        if var cfg = sourceConfigs["wenku8"] {
+            cfg.cookie = norm
+            sourceConfigs["wenku8"] = cfg
+        }
         savePersistedState()
         isTestingCookie = true
         cookieVerifyMessage = nil
@@ -1612,6 +1964,8 @@ public final class StudioViewModel: ObservableObject {
             await self.syncRefreshedCookieFromClient()
             self.cookieVerifyPassed = res.isLoggedIn
             self.cookieVerifyMessage = res.message
+            self.perSourceVerifyPassed["wenku8"] = res.isLoggedIn
+            self.perSourceVerifyMessage["wenku8"] = res.message
             if res.isLoggedIn {
                 self.userProfile = try? await self.client.fetchUserProfile(baseURL: self.baseURL)
                 await self.syncRefreshedCookieFromClient()
@@ -1627,22 +1981,45 @@ public final class StudioViewModel: ObservableObject {
         }
     }
 
-    public func applyWebLoginCookie(_ rawCookie: String) {
-        customCookie = Wenku8Client.normalizeCookie(rawCookie)
+    public func applyWebLoginCookie(_ rawCookie: String, sourceId: String? = nil) {
+        let targetSid = sourceId ?? activeLoginSourceId
+        let normalized = Wenku8Client.normalizeCookie(rawCookie)
+        var cfg = sourceConfig(for: targetSid)
+        cfg.cookie = normalized
+        sourceConfigs[targetSid] = cfg
+
         showWebLoginSheet = false
         discoveryRequiresCookie = false
+        discoveryChallengeSourceId = nil
         discoveryNotice = nil
-        bookshelfSyncNotice = nil
-        testCookieValidity()
+
+        if targetSid == "wenku8" {
+            customCookie = normalized
+            bookshelfSyncNotice = nil
+            testCookieValidity()
+        } else {
+            savePersistedState()
+            testSourceSession(sourceId: targetSid)
+        }
     }
 
-    public func clearSavedCookie() {
-        customCookie = ""
-        cookieVerifyMessage = nil
-        cookieVerifyPassed = nil
-        userProfile = nil
-        lastCookieRefreshStatus = nil
-        stopCookieRefreshScheduler()
+    public func clearSavedCookie(for sourceId: String = "wenku8") {
+        if var cfg = sourceConfigs[sourceId] {
+            cfg.cookie = ""
+            sourceConfigs[sourceId] = cfg
+        }
+        if sourceId == "wenku8" {
+            customCookie = ""
+            cookieVerifyMessage = nil
+            cookieVerifyPassed = nil
+            userProfile = nil
+            lastCookieRefreshStatus = nil
+            stopCookieRefreshScheduler()
+        } else {
+            perSourceVerifyPassed[sourceId] = nil
+            perSourceVerifyMessage[sourceId] = nil
+            savePersistedState()
+        }
         Task { await syncClientSettings() }
     }
 
@@ -1762,9 +2139,10 @@ public final class StudioViewModel: ObservableObject {
     }
 
     private func recordHistory(detail: BookDetail) {
-        history.removeAll { $0.id == detail.bookId }
+        history.removeAll { $0.id == detail.bookId && $0.sourceId == detail.sourceId }
         history.insert(BookmarkEntry(
             id: detail.bookId,
+            sourceId: detail.sourceId,
             title: detail.title,
             author: detail.author,
             coverURL: detail.coverURL,
@@ -1846,6 +2224,7 @@ public final class StudioViewModel: ObservableObject {
                         (vOffset, cOffset, pair.0.title, chap)
                     }
                 }
+                let plugin = self.sourceRegistry.plugin(for: detail.sourceId) ?? self.client
                 let totalChapters = flatTargets.count
                 var fetchedByKey: [String: ChapterContent] = [:]
                 var completedChapters = 0
@@ -1857,7 +2236,7 @@ public final class StudioViewModel: ObservableObject {
                         nextIndex += 1
                         group.addTask {
                             try Task.checkCancellation()
-                            let content = try await self.client.fetchChapterContent(chapter: target.chapter, baseURL: detail.baseURL)
+                            let content = try await plugin.fetchChapterContent(chapter: target.chapter, book: detail)
                             return (target.chapter.id, target.volTitle, target.chapter.title, content)
                         }
                     }
@@ -1866,16 +2245,16 @@ public final class StudioViewModel: ObservableObject {
                         try Task.checkCancellation()
                         fetchedByKey[chapId] = content
                         completedChapters += 1
-                        currentStageText = "拉取文本 (\(completedChapters)/\(totalChapters))：\(volTitle) · \(chapTitle)"
-                        appendLog("已抓取 (\(completedChapters)/\(totalChapters))：[\(volTitle)] \(chapTitle)")
-                        progressFraction = 0.55 * (Double(completedChapters) / Double(max(1, totalChapters)))
+                        self.currentStageText = "拉取文本 (\(completedChapters)/\(totalChapters))：\(volTitle) · \(chapTitle)"
+                        self.appendLog("已抓取 (\(completedChapters)/\(totalChapters))：[\(volTitle)] \(chapTitle)")
+                        self.progressFraction = 0.55 * (Double(completedChapters) / Double(max(1, totalChapters)))
 
                         if nextIndex < totalChapters {
                             let nextTarget = flatTargets[nextIndex]
                             nextIndex += 1
                             group.addTask {
                                 try Task.checkCancellation()
-                                let content = try await self.client.fetchChapterContent(chapter: nextTarget.chapter, baseURL: detail.baseURL)
+                                let content = try await plugin.fetchChapterContent(chapter: nextTarget.chapter, book: detail)
                                 return (nextTarget.chapter.id, nextTarget.volTitle, nextTarget.chapter.title, content)
                             }
                         }
@@ -1913,7 +2292,7 @@ public final class StudioViewModel: ObservableObject {
                 currentStageText = "并发下载图片（共 \(uniqueImgCount) 张）..."
                 appendLog("开始并发下载 \(uniqueImgCount) 张图片（并发数 \(concurrencySnapshot)）")
 
-                let downloadedImages = try await client.downloadImages(
+                let downloadedImages = try await plugin.downloadImages(
                     urls: allImageURLs,
                     referer: detail.baseURL,
                     maxConcurrency: concurrencySnapshot
@@ -2038,12 +2417,21 @@ public final class StudioViewModel: ObservableObject {
     private var stateFileURL: URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support")
-        let dir = appSupport.appendingPathComponent("Wenku8Studio", isDirectory: true)
+        let dir = appSupport.appendingPathComponent("ShioriStudio", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("state.json")
     }
 
+    private var legacyStateFileURL: URL {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support")
+        return appSupport
+            .appendingPathComponent("Wenku8Studio", isDirectory: true)
+            .appendingPathComponent("state.json")
+    }
+
     public func savePersistedState() {
+        let targetURL = stateFileURL
         let state = PersistedAppState(
             bookmarks: bookmarks,
             history: history,
@@ -2085,15 +2473,22 @@ public final class StudioViewModel: ObservableObject {
             showCardSummary: showCardSummary,
             compactBookCards: compactBookCards,
             autoCheckUpdatesOnLaunch: autoCheckUpdatesOnLaunch,
-            showAdvancedSettings: showAdvancedSettings
+            showAdvancedSettings: showAdvancedSettings,
+            sourceConfigs: sourceConfigs,
+            selectedDiscoverySourceFilter: selectedDiscoverySourceFilter,
+            activeDiscoverySourceId: activeDiscoverySourceId
         )
-        if let data = try? JSONEncoder().encode(state) {
-            try? data.write(to: stateFileURL)
+        persistenceQueue.async {
+            if let data = try? JSONEncoder().encode(state) {
+                try? data.write(to: targetURL, options: .atomic)
+            }
         }
     }
 
     private func loadPersistedState() {
-        guard let data = try? Data(contentsOf: stateFileURL),
+        let primaryData = try? Data(contentsOf: stateFileURL)
+        let loadedData = primaryData ?? (try? Data(contentsOf: legacyStateFileURL))
+        guard let data = loadedData,
               let state = try? JSONDecoder().decode(PersistedAppState.self, from: data) else {
             return
         }
@@ -2106,7 +2501,13 @@ public final class StudioViewModel: ObservableObject {
         politeDelaySeconds = state.politeDelaySeconds
         if !state.outputDirectoryPath.isEmpty { outputDirectoryPath = state.outputDirectoryPath }
         customCookie = state.customCookie
-        lastReadChapterByBook = state.lastReadChapterByBook ?? [:]
+        let rawLastRead = state.lastReadChapterByBook ?? [:]
+        var migratedLastRead: [String: String] = [:]
+        for (key, value) in rawLastRead {
+            let scopedKey = key.contains(":") ? key : "wenku8:\(key)"
+            migratedLastRead[scopedKey] = value
+        }
+        lastReadChapterByBook = migratedLastRead
         autoRefreshCookieEnabled = state.autoRefreshCookieEnabled ?? true
         cookieRefreshIntervalMinutes = max(1, min(180, state.cookieRefreshIntervalMinutes ?? 15))
         lastCookieRefreshAt = state.lastCookieRefreshAt
@@ -2141,6 +2542,18 @@ public final class StudioViewModel: ObservableObject {
         if let compact = state.compactBookCards { compactBookCards = compact }
         if let autoUpd = state.autoCheckUpdatesOnLaunch { autoCheckUpdatesOnLaunch = autoUpd }
         if let adv = state.showAdvancedSettings { showAdvancedSettings = adv }
+        if let cfgs = state.sourceConfigs, !cfgs.isEmpty {
+            sourceConfigs = cfgs
+        }
+        if primaryData == nil {
+            // Keep Bilinovel disabled by default during first-time state migration from Wenku8Studio
+            sourceConfigs["bilinovel"]?.isEnabled = false
+        }
+        selectedDiscoverySourceFilter = state.selectedDiscoverySourceFilter
+        if let activeSrc = state.activeDiscoverySourceId, !activeSrc.isEmpty {
+            activeDiscoverySourceId = activeSrc
+        }
+        ensureDefaultSourceConfigsPopulated()
     }
 }
 

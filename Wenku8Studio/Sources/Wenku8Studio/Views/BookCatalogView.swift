@@ -6,45 +6,56 @@ struct BookCatalogView: View {
     @State private var showFullDescription = false
 
     var body: some View {
-        Group {
-            if vm.isLoadingBook && vm.bookDetail == nil {
-                VStack(spacing: 14) {
-                    ProgressView()
-                        .controlSize(.large)
-                    Text("正在从 \(vm.baseURL) 拉取书籍信息与目录...")
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let book = vm.bookDetail {
-                ZStack(alignment: .bottom) {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 18) {
-                            bookHeaderCard(book)
-                            if !book.recommendations.isEmpty {
-                                recommendationsStrip(book)
-                            }
-                            catalogControlsBar(book)
-                            volumesList(book)
-                        }
-                        .padding(20)
-                        .padding(.bottom, 76)
+        HStack(spacing: 0) {
+            Group {
+                if vm.isLoadingBook && vm.bookDetail == nil {
+                    VStack(spacing: 14) {
+                        ProgressView()
+                            .controlSize(.large)
+                        Text("正在从 \(vm.baseURL) 拉取书籍信息与目录...")
+                            .foregroundStyle(.secondary)
                     }
-                    .id(book.bookId)
-                    .scrollEdgeEffectHidden(true, for: .all)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let book = vm.bookDetail {
+                    ZStack(alignment: .bottom) {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 18) {
+                                bookHeaderCard(book)
+                                if !book.recommendations.isEmpty {
+                                    recommendationsStrip(book)
+                                }
+                                catalogControlsBar(book)
+                                volumesList(book)
+                            }
+                            .padding(20)
+                            .padding(.bottom, 86)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .id(book.bookId)
+                        .scrollEdgeEffectHidden(true, for: .all)
 
-                    bottomActionBar(book)
-                        .padding(.horizontal, 20)
-                        .padding(.bottom, 14)
+                        bottomActionBar(book)
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 14)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
+                } else {
+                    emptyStateView
                 }
-                .clipped()
-            } else {
-                emptyStateView
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            if vm.showReviewsInspector {
+                Divider()
+                ReviewsInspectorView()
+                    .frame(width: 360)
+                    .frame(maxHeight: .infinity)
+                    .background(Color(nsColor: .windowBackgroundColor))
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
-        .inspector(isPresented: $vm.showReviewsInspector) {
-            ReviewsInspectorView()
-                .inspectorColumnWidth(min: 340, ideal: 410, max: 520)
-        }
+        .animation(.easeInOut(duration: 0.2), value: vm.showReviewsInspector)
     }
 
     private var emptyStateView: some View {
@@ -97,11 +108,16 @@ struct BookCatalogView: View {
                             .textSelection(.enabled)
                         HStack(spacing: 10) {
                             Button {
-                                vm.loadAuthorWorks(author: book.author)
+                                vm.loadAuthorWorks(author: book.author, sourceId: book.sourceId)
                             } label: {
                                 Label(book.author, systemImage: "person.fill")
                             }
                             .buttonStyle(.link)
+
+                            StudioSourceBadge(
+                                title: vm.sourceBadgeTitle(for: book.sourceId),
+                                sourceId: book.sourceId
+                            )
 
                             if !book.publisher.isEmpty {
                                 badge(book.publisher, color: .blue)
@@ -113,7 +129,7 @@ struct BookCatalogView: View {
                         }
                     }
                     Spacer()
-                    let saved = vm.isBookmarked(book.bookId)
+                    let saved = vm.isBookmarked(book.bookId, sourceId: book.sourceId)
                     StudioPillButton(
                         title: saved ? "已在书架" : "加入书架",
                         systemImage: saved ? "bookmark.fill" : "bookmark",
@@ -122,7 +138,11 @@ struct BookCatalogView: View {
                     ) {
                         vm.toggleBookmark(book)
                     }
-                    .help(vm.isCloudSessionAvailable ? "加入/移出书架（已登录，将直接同步到云端书架）" : "加入/移出书架（当前未登录，将暂存本地并在登录后同步）")
+                    .help(
+                        book.sourceId == "wenku8"
+                            ? (vm.isCloudSessionAvailable ? "加入/移出书架（已登录，将直接同步到云端书架）" : "加入/移出书架（当前未登录，将暂存本地并在登录后同步）")
+                            : "加入/移出本地书架"
+                    )
                 }
 
                 HStack(spacing: 16) {
@@ -167,26 +187,30 @@ struct BookCatalogView: View {
                             vm.openLastReadOrFirstChapter()
                         }
 
-                        StudioFilterChip(
-                            title: vm.showReviewsInspector ? "收起/查看书评" : "查看书评",
-                            systemImage: "bubble.left.and.bubble.right",
-                            isSelected: vm.showReviewsInspector
-                        ) {
-                            vm.openReviewsInspectorForCurrentBook()
+                        if vm.currentBookSupportsReviews {
+                            StudioFilterChip(
+                                title: vm.showReviewsInspector ? "收起评论" : "展开评论",
+                                systemImage: vm.showReviewsInspector ? "bubble.left.and.bubble.right.fill" : "bubble.left.and.bubble.right",
+                                isSelected: vm.showReviewsInspector
+                            ) {
+                                vm.toggleReviewsInspectorForCurrentBook()
+                            }
                         }
 
-                        StudioFilterChip(
-                            title: vm.isVotingBook ? "投票中..." : "推一下",
-                            systemImage: "hand.thumbsup",
-                            isSelected: false
-                        ) {
-                            vm.voteCurrentBook()
+                        if vm.currentBookSupportsCloudActions {
+                            StudioFilterChip(
+                                title: vm.isVotingBook ? "投票中..." : "推一下",
+                                systemImage: "hand.thumbsup",
+                                isSelected: false
+                            ) {
+                                vm.voteCurrentBook()
+                            }
+                            .disabled(vm.isVotingBook)
+                            .help("为本书投推荐票（每日可用账号推荐次数）")
                         }
-                        .disabled(vm.isVotingBook)
-                        .help("为本书投推荐票（每日可用账号推荐次数）")
 
                         StudioFilterChip(title: "同作者作品", systemImage: "person.2", isSelected: false) {
-                            vm.loadAuthorWorks(author: book.author)
+                            vm.loadAuthorWorks(author: book.author, sourceId: book.sourceId)
                         }
 
                         StudioFilterChip(title: "拼装设置", systemImage: "slider.horizontal.3", isSelected: false) {
@@ -220,9 +244,9 @@ struct BookCatalogView: View {
                 .font(.headline)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
-                    ForEach(book.recommendations) { rec in
+                    ForEach(book.recommendations, id: \.scopedId) { rec in
                         RecommendationBookChip(rec: rec) {
-                            vm.loadBook(inputOverride: rec.id)
+                            vm.loadBook(inputOverride: rec.id, sourceIdOverride: rec.sourceId)
                         }
                     }
                 }
@@ -233,51 +257,81 @@ struct BookCatalogView: View {
     }
 
     private func catalogControlsBar(_ book: BookDetail) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("分卷与章节目录（共 \(book.volumes.count) 卷）")
-                    .font(.headline)
-                Spacer()
-                HStack(spacing: 8) {
-                    StudioPillButton(
-                        title: vm.areAllChaptersSelected ? "已全选整本" : "全选整本",
-                        systemImage: vm.areAllChaptersSelected ? "checkmark.circle.fill" : "checklist.checked",
-                        variant: vm.areAllChaptersSelected ? .primary : .secondary,
-                        size: .small
-                    ) {
-                        vm.selectAllChapters()
+        let quickActionButtons = HStack(spacing: 8) {
+            StudioPillButton(
+                title: vm.areAllChaptersSelected ? "已全选整本" : "全选整本",
+                systemImage: vm.areAllChaptersSelected ? "checkmark.circle.fill" : "checklist.checked",
+                variant: vm.areAllChaptersSelected ? .primary : .secondary,
+                size: .small
+            ) {
+                vm.selectAllChapters()
+            }
+            StudioPillButton(title: "仅首卷", size: .small) { vm.selectFirstVolumeOnly() }
+            StudioPillButton(title: "清空", size: .small) { vm.clearSelection() }
+            StudioPillButton(title: "反选", size: .small) { vm.invertSelection() }
+            StudioPillButton(title: "仅含插图卷", size: .small) { vm.selectIllustratedVolumesOnly() }
+        }
+        .fixedSize(horizontal: true, vertical: false)
+
+        let filterInputs = HStack(spacing: 10) {
+            StudioSearchField(
+                icon: "magnifyingglass",
+                placeholder: "按章节名过滤...",
+                text: $vm.chapterSearchQuery
+            )
+            .frame(minWidth: 150, maxWidth: 230)
+
+            StudioSearchField(
+                icon: "number",
+                placeholder: "按卷号勾选（1-3）",
+                text: $vm.volumeRangeInput,
+                onSubmit: { vm.applyVolumeRangeSelection() }
+            )
+            .frame(minWidth: 160, maxWidth: 230)
+
+            StudioPillButton(title: "应用卷号", size: .small) {
+                vm.applyVolumeRangeSelection()
+            }
+            .fixedSize()
+        }
+
+        let exportModeTabs = StudioSegmentedTabs(selection: $vm.assemblyConfig.exportMode, items: ExportMode.allCases)
+            .frame(width: 280)
+
+        return VStack(alignment: .leading, spacing: 10) {
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    Text("分卷与章节目录（共 \(book.volumes.count) 卷）")
+                        .font(.headline)
+                        .fixedSize()
+                    Spacer(minLength: 12)
+                    quickActionButtons
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("分卷与章节目录（共 \(book.volumes.count) 卷）")
+                        .font(.headline)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        quickActionButtons
                     }
-                    StudioPillButton(title: "仅首卷", size: .small) { vm.selectFirstVolumeOnly() }
-                    StudioPillButton(title: "清空", size: .small) { vm.clearSelection() }
-                    StudioPillButton(title: "反选", size: .small) { vm.invertSelection() }
-                    StudioPillButton(title: "仅含插图卷", size: .small) { vm.selectIllustratedVolumesOnly() }
+                    .scrollEdgeEffectHidden(true, for: .all)
                 }
             }
 
-            HStack(spacing: 10) {
-                StudioSearchField(
-                    icon: "magnifyingglass",
-                    placeholder: "按章节名过滤...",
-                    text: $vm.chapterSearchQuery
-                )
-                .frame(maxWidth: 230)
-
-                StudioSearchField(
-                    icon: "number",
-                    placeholder: "按卷号勾选（如 1-3 或 1,2,4）",
-                    text: $vm.volumeRangeInput,
-                    onSubmit: { vm.applyVolumeRangeSelection() }
-                )
-                .frame(maxWidth: 250)
-
-                StudioPillButton(title: "应用卷号", size: .small) {
-                    vm.applyVolumeRangeSelection()
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) {
+                    filterInputs
+                    Spacer(minLength: 8)
+                    exportModeTabs
                 }
 
-                Spacer()
-
-                StudioSegmentedTabs(selection: $vm.assemblyConfig.exportMode, items: ExportMode.allCases)
-                    .frame(maxWidth: 300)
+                VStack(alignment: .leading, spacing: 8) {
+                    filterInputs
+                    HStack {
+                        exportModeTabs
+                        Spacer()
+                    }
+                }
             }
         }
     }
@@ -473,7 +527,6 @@ private struct RecommendationBookChip: View {
 
     @Environment(\.studioAccentColor) private var studioAccent
     @State private var isHovered = false
-    @State private var isPressed = false
 
     var body: some View {
         Button(action: action) {
@@ -507,26 +560,15 @@ private struct RecommendationBookChip: View {
                 radius: isHovered ? 5 : 2,
                 y: isHovered ? 2 : 1
             )
-            .scaleEffect(isPressed ? 0.96 : (isHovered ? 1.02 : 1.0))
+            .scaleEffect(isHovered ? 1.02 : 1.0)
             .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(StudioPressScaleStyle(pressedScale: 0.96))
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.14)) {
                 isHovered = hovering
             }
         }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in
-                    if !isPressed {
-                        withAnimation(.easeOut(duration: 0.08)) { isPressed = true }
-                    }
-                }
-                .onEnded { _ in
-                    withAnimation(.easeOut(duration: 0.14)) { isPressed = false }
-                }
-        )
         .help("点击打开《\(rec.title)》目录")
     }
 }

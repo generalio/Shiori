@@ -2,15 +2,34 @@ import Foundation
 
 public struct RecommendedBook: Identifiable, Codable, Hashable, Sendable {
     public let id: String
+    public let sourceId: String
     public let title: String
     public let coverURL: String
     public let isCompleted: Bool
 
-    public init(id: String, title: String, coverURL: String, isCompleted: Bool = false) {
+    public var scopedId: String { "\(sourceId):\(id)" }
+
+    public init(
+        id: String,
+        sourceId: String = "wenku8",
+        title: String,
+        coverURL: String,
+        isCompleted: Bool = false
+    ) {
         self.id = id
+        self.sourceId = sourceId
         self.title = title
         self.coverURL = coverURL
         self.isCompleted = isCompleted
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        sourceId = try c.decodeIfPresent(String.self, forKey: .sourceId) ?? "wenku8"
+        title = try c.decode(String.self, forKey: .title)
+        coverURL = try c.decode(String.self, forKey: .coverURL)
+        isCompleted = try c.decodeIfPresent(Bool.self, forKey: .isCompleted) ?? false
     }
 }
 
@@ -76,6 +95,7 @@ public enum SearchScope: String, CaseIterable, Identifiable, Sendable {
 
 public struct AuthorBookItem: Identifiable, Codable, Hashable, Sendable {
     public let id: String
+    public let sourceId: String
     public let title: String
     public let author: String
     public let category: String
@@ -87,8 +107,11 @@ public struct AuthorBookItem: Identifiable, Codable, Hashable, Sendable {
     public let summary: String
     public let coverURL: String
 
+    public var scopedId: String { "\(sourceId):\(id)" }
+
     public init(
         id: String,
+        sourceId: String = "wenku8",
         title: String,
         author: String,
         category: String,
@@ -101,6 +124,7 @@ public struct AuthorBookItem: Identifiable, Codable, Hashable, Sendable {
         coverURL: String
     ) {
         self.id = id
+        self.sourceId = sourceId
         self.title = title
         self.author = author
         self.category = category
@@ -112,10 +136,27 @@ public struct AuthorBookItem: Identifiable, Codable, Hashable, Sendable {
         self.summary = summary
         self.coverURL = coverURL
     }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        sourceId = try c.decodeIfPresent(String.self, forKey: .sourceId) ?? "wenku8"
+        title = try c.decode(String.self, forKey: .title)
+        author = try c.decode(String.self, forKey: .author)
+        category = try c.decodeIfPresent(String.self, forKey: .category) ?? ""
+        updatedAt = try c.decodeIfPresent(String.self, forKey: .updatedAt) ?? ""
+        wordCount = try c.decodeIfPresent(String.self, forKey: .wordCount) ?? ""
+        status = try c.decodeIfPresent(String.self, forKey: .status) ?? ""
+        popularity = try c.decodeIfPresent(String.self, forKey: .popularity) ?? ""
+        tags = try c.decodeIfPresent([String].self, forKey: .tags) ?? []
+        summary = try c.decodeIfPresent(String.self, forKey: .summary) ?? ""
+        coverURL = try c.decodeIfPresent(String.self, forKey: .coverURL) ?? ""
+    }
 }
 
 public struct ChapterItem: Identifiable, Codable, Hashable, Sendable {
     public let id: String
+    public let sourceId: String
     public let title: String
     public let url: String
     public let volumeIndex: Int
@@ -124,6 +165,7 @@ public struct ChapterItem: Identifiable, Codable, Hashable, Sendable {
 
     public init(
         id: String,
+        sourceId: String = "wenku8",
         title: String,
         url: String,
         volumeIndex: Int,
@@ -131,11 +173,23 @@ public struct ChapterItem: Identifiable, Codable, Hashable, Sendable {
         isIllustrationChapter: Bool
     ) {
         self.id = id
+        self.sourceId = sourceId
         self.title = title
         self.url = url
         self.volumeIndex = volumeIndex
         self.chapterIndex = chapterIndex
         self.isIllustrationChapter = isIllustrationChapter
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        sourceId = try c.decodeIfPresent(String.self, forKey: .sourceId) ?? "wenku8"
+        title = try c.decode(String.self, forKey: .title)
+        url = try c.decode(String.self, forKey: .url)
+        volumeIndex = try c.decode(Int.self, forKey: .volumeIndex)
+        chapterIndex = try c.decode(Int.self, forKey: .chapterIndex)
+        isIllustrationChapter = try c.decodeIfPresent(Bool.self, forKey: .isIllustrationChapter) ?? false
     }
 }
 
@@ -159,6 +213,7 @@ public struct VolumeItem: Identifiable, Codable, Hashable, Sendable {
 
 public struct BookDetail: Codable, Hashable, Sendable {
     public let bookId: String
+    public let sourceId: String
     public let baseURL: String
     public let title: String
     public let author: String
@@ -175,8 +230,11 @@ public struct BookDetail: Codable, Hashable, Sendable {
     public let volumes: [VolumeItem]
     public let recommendations: [RecommendedBook]
 
+    public var scopedId: String { "\(sourceId):\(bookId)" }
+
     public init(
         bookId: String,
+        sourceId: String = "wenku8",
         baseURL: String,
         title: String,
         author: String,
@@ -194,6 +252,7 @@ public struct BookDetail: Codable, Hashable, Sendable {
         recommendations: [RecommendedBook]
     ) {
         self.bookId = bookId
+        self.sourceId = sourceId
         self.baseURL = baseURL
         self.title = title
         self.author = author
@@ -209,6 +268,27 @@ public struct BookDetail: Codable, Hashable, Sendable {
         self.catalogURL = catalogURL
         self.volumes = volumes
         self.recommendations = recommendations
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        bookId = try c.decode(String.self, forKey: .bookId)
+        sourceId = try c.decodeIfPresent(String.self, forKey: .sourceId) ?? "wenku8"
+        baseURL = try c.decode(String.self, forKey: .baseURL)
+        title = try c.decode(String.self, forKey: .title)
+        author = try c.decode(String.self, forKey: .author)
+        publisher = try c.decodeIfPresent(String.self, forKey: .publisher) ?? ""
+        status = try c.decodeIfPresent(String.self, forKey: .status) ?? ""
+        lastUpdated = try c.decodeIfPresent(String.self, forKey: .lastUpdated) ?? ""
+        wordCount = try c.decodeIfPresent(String.self, forKey: .wordCount) ?? ""
+        popularity = try c.decodeIfPresent(String.self, forKey: .popularity) ?? ""
+        latestChapter = try c.decodeIfPresent(String.self, forKey: .latestChapter) ?? ""
+        tags = try c.decodeIfPresent([String].self, forKey: .tags) ?? []
+        description = try c.decodeIfPresent(String.self, forKey: .description) ?? ""
+        coverURL = try c.decodeIfPresent(String.self, forKey: .coverURL) ?? ""
+        catalogURL = try c.decodeIfPresent(String.self, forKey: .catalogURL) ?? ""
+        volumes = try c.decodeIfPresent([VolumeItem].self, forKey: .volumes) ?? []
+        recommendations = try c.decodeIfPresent([RecommendedBook].self, forKey: .recommendations) ?? []
     }
 }
 
@@ -308,6 +388,7 @@ public struct AssemblyConfig: Codable, Hashable, Sendable {
 
 public struct BookmarkEntry: Identifiable, Codable, Hashable, Sendable {
     public let id: String
+    public var sourceId: String
     public var title: String
     public var author: String
     public var coverURL: String
@@ -325,8 +406,11 @@ public struct BookmarkEntry: Identifiable, Codable, Hashable, Sendable {
     public var cloudChapterTitle: String
     public var hasSyncedToCloud: Bool
 
+    public var scopedId: String { "\(sourceId):\(id)" }
+
     public init(
         id: String,
+        sourceId: String = "wenku8",
         title: String,
         author: String,
         coverURL: String,
@@ -345,6 +429,7 @@ public struct BookmarkEntry: Identifiable, Codable, Hashable, Sendable {
         hasSyncedToCloud: Bool = false
     ) {
         self.id = id
+        self.sourceId = sourceId
         self.title = title
         self.author = author
         self.coverURL = coverURL
@@ -366,6 +451,7 @@ public struct BookmarkEntry: Identifiable, Codable, Hashable, Sendable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
+        sourceId = try c.decodeIfPresent(String.self, forKey: .sourceId) ?? "wenku8"
         title = try c.decode(String.self, forKey: .title)
         author = try c.decode(String.self, forKey: .author)
         coverURL = try c.decode(String.self, forKey: .coverURL)
@@ -691,6 +777,7 @@ public enum ReaderScriptMode: String, CaseIterable, Codable, Identifiable, Senda
 
 public struct ReaderBookmarkNote: Identifiable, Codable, Hashable, Sendable {
     public let id: UUID
+    public let sourceId: String
     public let bookId: String
     public let chapterId: String
     public let chapterTitle: String
@@ -701,6 +788,7 @@ public struct ReaderBookmarkNote: Identifiable, Codable, Hashable, Sendable {
 
     public init(
         id: UUID = UUID(),
+        sourceId: String = "wenku8",
         bookId: String,
         chapterId: String,
         chapterTitle: String,
@@ -710,6 +798,7 @@ public struct ReaderBookmarkNote: Identifiable, Codable, Hashable, Sendable {
         createdAt: Date = Date()
     ) {
         self.id = id
+        self.sourceId = sourceId
         self.bookId = bookId
         self.chapterId = chapterId
         self.chapterTitle = chapterTitle
@@ -717,5 +806,18 @@ public struct ReaderBookmarkNote: Identifiable, Codable, Hashable, Sendable {
         self.progressRatio = progressRatio
         self.excerpt = excerpt
         self.createdAt = createdAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        sourceId = try c.decodeIfPresent(String.self, forKey: .sourceId) ?? "wenku8"
+        bookId = try c.decode(String.self, forKey: .bookId)
+        chapterId = try c.decode(String.self, forKey: .chapterId)
+        chapterTitle = try c.decode(String.self, forKey: .chapterTitle)
+        pageIndex = try c.decode(Int.self, forKey: .pageIndex)
+        progressRatio = try c.decode(Double.self, forKey: .progressRatio)
+        excerpt = try c.decode(String.self, forKey: .excerpt)
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
     }
 }

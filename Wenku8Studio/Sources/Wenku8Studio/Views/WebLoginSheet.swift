@@ -6,15 +6,26 @@ struct WebLoginSheet: View {
     @EnvironmentObject var vm: StudioViewModel
     @State private var currentURLString: String = ""
     @State private var webViewRef: WKWebView?
-    @State private var statusHint: String = "请在下方网页登录你的 wenku8 账号，登录成功后点击右上角「提取 Cookie」。"
+    @State private var statusHint: String = ""
+
+    private var activeSourceName: String {
+        vm.sourceRegistry.plugin(for: vm.activeLoginSourceId)?.descriptor.displayName ?? "轻小说文库"
+    }
+
+    private var defaultHint: String {
+        if vm.activeLoginSourceId == "bilinovel" {
+            return "若站点弹出人机验证或登录页，请在下方完成验证后点击右上角「同步会话 / Cookie」。"
+        }
+        return "请在下方网页登录你的账号，登录成功后点击右上角「提取 Cookie」。"
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("轻小说文库 · 内置登录获取 Cookie")
+                    Text("\(activeSourceName) · 内置登录与验证")
                         .font(.headline)
-                    Text(statusHint)
+                    Text(statusHint.isEmpty ? defaultHint : statusHint)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -42,7 +53,7 @@ struct WebLoginSheet: View {
             Divider()
 
             Wenku8WebView(
-                initialURL: URL(string: "\(Wenku8Client.normalizeBaseURL(vm.baseURL))/login.php")!,
+                initialURL: vm.activeLoginURL(),
                 currentURLString: $currentURLString,
                 webViewRef: $webViewRef
             )
@@ -55,20 +66,25 @@ struct WebLoginSheet: View {
             statusHint = "无法读取浏览器 Cookie 存储"
             return
         }
+        let targetSourceId = vm.activeLoginSourceId
+        let activeHost = vm.activeLoginURL().host?.lowercased() ?? ""
         store.getAllCookies { cookies in
             let relevant = cookies.filter { cookie in
                 let domain = cookie.domain.lowercased()
-                return domain.contains("wenku8")
+                if targetSourceId == "bilinovel" {
+                    return domain.contains("linovelib") || domain.contains("bilinovel") || (!activeHost.isEmpty && domain.contains(activeHost.replacingOccurrences(of: "www.", with: "")))
+                }
+                return domain.contains("wenku8") || (!activeHost.isEmpty && domain.contains(activeHost.replacingOccurrences(of: "www.", with: "")))
             }
             if relevant.isEmpty {
                 DispatchQueue.main.async {
-                    statusHint = "尚未检测到 wenku8 Cookie，请确认已完成登录。"
+                    statusHint = "尚未检测到该站点 Cookie，请确认已完成登录或验证。"
                 }
                 return
             }
             let cookieString = relevant.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
             DispatchQueue.main.async {
-                vm.applyWebLoginCookie(cookieString)
+                vm.applyWebLoginCookie(cookieString, sourceId: targetSourceId)
             }
         }
     }

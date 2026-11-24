@@ -1,7 +1,7 @@
 <div align="center">
-  <img src="Wenku8Studio/AppResources/icon_raw.png" width="136" style="border-radius: 28px;" alt="Wenku8 Studio Icon"/>
-  <h1>Wenku8 Studio</h1>
-  <p><strong>轻小说文库（wenku8）macOS 原生 Liquid Glass 客户端 & 全功能 CLI EPUB 拼装工具</strong></p>
+  <img src="Wenku8Studio/AppResources/icon_raw.png" width="136" style="border-radius: 28px;" alt="Shiori Studio Icon"/>
+  <h1>Shiori Studio</h1>
+  <p><strong>栞 · macOS 原生多书源轻小说阅读与 EPUB 出版工坊（含全功能 Python CLI）</strong></p>
 
   <p>
     <a href="https://github.com/generalio/lightnovel-download/actions/workflows/ci.yml">
@@ -33,9 +33,9 @@
 
 ## 简介
 
-**Wenku8 Studio** 是一套面向 [轻小说文库（wenku8）](https://www.wenku8.cc) 的轻小说阅读、目录检索与 **EPUB 3.0 / 2.0 定制拼装工具**，由两部分构成：
+**Shiori Studio**（取自日语「栞 Shiori」，意为夹在书页间的阅读书签）是一套面向轻小说阅读、多渠道插件化聚合检索与 **EPUB 3.0 / 2.0 出版级定制拼装工具**，由两部分构成：
 
-1. **macOS 原生桌面客户端（`Wenku8Studio.app`）**：基于 SwiftUI + macOS 26+ 原生 **Liquid Glass（液态玻璃）** 打造，零第三方依赖，提供发现与搜索、图文书架与浏览历史、可视化分卷/章节勾选、内置沉浸阅读器（含插图大图灯箱预览）、macOS 原生检查器书评楼中楼及 EPUB 拼装配置。
+1. **macOS 原生桌面客户端（`ShioriStudio.app`）**：基于 SwiftUI + macOS 26+ 原生 **Liquid Glass（液态玻璃）** 打造，采用模块化 `BookSourceKit` + `SourceAggregationEngine` 热插拔书源插件架构（当前默认启用 [轻小说文库（wenku8）](https://www.wenku8.cc)，并保留哔哩轻小说等可扩展插件槽位），提供发现与多渠道聚合检索、图文书架与浏览历史、可视化分卷/章节勾选、内置沉浸阅读器（含插图大图灯箱预览）、右侧滑出书评楼中楼及 EPUB 拼装配置。
 2. **跨平台命令行工具（`lightnovel.py`）**：轻量、无图形依赖，具备与桌面端对等的书籍检索、书评查看、终端阅读、单卷/多卷合集 EPUB 拼装能力，适合批处理与终端用户。
 
 ---
@@ -73,11 +73,11 @@
 
 ### 方式一：下载 macOS Release 安装包
 
-前往 [Releases 页面](https://github.com/generalio/lightnovel-download/releases) 下载最新 `Wenku8Studio-v*-macOS-arm64.dmg` 或 `.zip`，拖入「应用程序」即可运行（macOS 26+ Apple Silicon）。
+前往 [Releases 页面](https://github.com/generalio/lightnovel-download/releases) 下载最新 `ShioriStudio-v*-macOS-arm64.dmg` 或 `.zip`，拖入「应用程序」即可运行（macOS 26+ Apple Silicon）。
 
 > 若首次打开提示来自未签名开发者，可在系统「隐私与安全性」中允许打开，或执行：
 > ```bash
-> xattr -cr /Applications/Wenku8Studio.app
+> xattr -cr /Applications/ShioriStudio.app
 > ```
 
 ### 方式二：从源码使用 Xcode 构建 macOS 客户端
@@ -87,7 +87,7 @@
 ```bash
 brew install xcodegen
 ./Wenku8Studio/build_app.sh
-open Wenku8Studio.app
+open ShioriStudio.app
 ```
 
 运行 Swift 单元测试：
@@ -157,7 +157,7 @@ python lightnovel.py --book_no 3115 --read 1:2
 仓库已配置自动化 GitHub Actions 工作流：
 
 - **持续集成**（[ci.yml](.github/workflows/ci.yml)）：推送或 PR 至主分支时自动运行 Python CLI/EPUB 测试与 macOS Xcode 编译测试。
-- **Tag 自动发版**（[release.yml](.github/workflows/release.yml)）：推送 `v*` 标签时自动运行测试、编译 `Wenku8Studio.app` 并打包发布 macOS `.dmg` 与 `.zip` 至 GitHub Releases：
+- **Tag 自动发版**（[release.yml](.github/workflows/release.yml)）：推送 `v*` 标签时自动运行测试、编译 `ShioriStudio.app` 并打包发布 macOS `.dmg` 与 `.zip` 至 GitHub Releases：
 
 ```bash
 git tag v2.4.0
@@ -171,13 +171,14 @@ git push origin v2.4.0
 ```text
 lightnovel-download/
 ├── .github/workflows/          # GitHub Actions CI & macOS Tag 自动发版工作流
-├── Wenku8Studio/               # macOS 原生 SwiftUI 客户端（Liquid Glass）
-│   ├── Sources/Wenku8Core/     # 网络抓取、GB18030 解析、Cookie 诊断、EPUB 组装引擎
-│   ├── Sources/Wenku8Studio/   # SwiftUI 视图与状态管理
+├── Wenku8Studio/               # Shiori Studio — macOS 原生 SwiftUI 客户端（Liquid Glass）
+│   ├── Sources/Wenku8Core/     # BookSourceKit SPI、书源聚合引擎、网络抓取与 EPUB 组装内核
+│   ├── Sources/Wenku8Studio/   # SwiftUI 视图、缩略图缓存与状态管理
 │   ├── Tests/Wenku8CoreTests/  # Swift XCTest 单元测试
 │   ├── AppResources/           # 应用图标（Assets.xcassets / icon_raw.png）与 Info.plist
 │   ├── project.yml             # XcodeGen 工程描述
 │   └── build_app.sh            # 一键生成 .xcodeproj 并编译打包 .app
+├── docs/PLUGIN_ARCHITECTURE.md # 多书源插件化与聚合架构设计文档
 ├── docs/screenshots/           # README 界面展示截图
 ├── Editer.py                   # Python 核心抓取、检索、书评与 EPUB 打包引擎
 ├── utils.py                    # Python EPUB 2/3 模板与 XML 转义工具
@@ -191,7 +192,7 @@ lightnovel-download/
 
 ## 致谢与原项目
 
-本项目的 Python 核心解析与初期 EPUB 构建思路源自开源项目 **[ShqWW/lightnovel-download](https://github.com/ShqWW/lightnovel-download)**（原作者 `ShqWW` / 王老板）。在此基础上，本仓库进行了独立架构演进与大幅功能重构——新增了原生 macOS SwiftUI 客户端（**Wenku8 Studio**）、`Wenku8Core` 解析/云端书架双向同步引擎、EPUB 3.0 组装与仿真阅读器，以及扩展的 CLI 与自动化 CI/CD 发版管线，特此向原项目致谢。
+本项目的 Python 核心解析与初期 EPUB 构建思路源自开源项目 **[ShqWW/lightnovel-download](https://github.com/ShqWW/lightnovel-download)**（原作者 `ShqWW` / 王老板）。在此基础上，本仓库进行了独立架构演进与大幅功能重构——新增了原生 macOS SwiftUI 客户端（**Shiori Studio**）、`Wenku8Core` 多书源插件化与云端书架双向同步引擎、EPUB 3.0 组装与仿真阅读器，以及扩展的 CLI 与自动化 CI/CD 发版管线，特此向原项目致谢。
 
 ---
 

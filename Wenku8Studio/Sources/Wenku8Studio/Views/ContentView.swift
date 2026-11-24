@@ -72,23 +72,13 @@ struct ContentView: View {
                 .shadow(color: StudioTokens.cardShadowColor, radius: 3, y: 1)
 
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Wenku8 Studio")
+                    Text("Shiori Studio")
                         .font(.headline.weight(.bold))
                     Text(vm.baseURL.replacingOccurrences(of: "https://", with: ""))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-
-                StudioCircleButton(
-                    systemImage: "gearshape",
-                    variant: vm.selectedSection == .settings ? .primary : .subtle,
-                    size: .small,
-                    accessibilityLabel: "打开设置"
-                ) {
-                    vm.navigateToSection(.settings)
-                }
-                .help("打开设置 (⌘,)")
             }
             .padding(.horizontal, 12)
             .padding(.top, 12)
@@ -117,16 +107,11 @@ struct ContentView: View {
                     vm.navigateToSection(.catalog)
                 } label: {
                     HStack(spacing: 9) {
-                        Group {
-                            if let cover = vm.coverPreviewImage ?? vm.coverImageCache[detail.coverURL] {
-                                Image(nsImage: cover)
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fill)
-                            } else {
-                                Image(systemName: "book.closed.fill")
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
+                        AsyncCoverThumbnail(
+                            urlString: detail.coverURL,
+                            sourceId: detail.sourceId,
+                            maxPixelSize: 160
+                        )
                         .frame(width: 30, height: 42)
                         .background(Color.secondary.opacity(0.12))
                         .clipShape(RoundedRectangle(cornerRadius: 6))
@@ -254,7 +239,7 @@ struct ContentView: View {
             if vm.isCloudSessionAvailable {
                 vm.navigateToSettingsCategory(.account)
             } else {
-                vm.showWebLoginSheet = true
+                vm.openWebLogin(for: "wenku8")
             }
         } label: {
             HStack(spacing: 8) {

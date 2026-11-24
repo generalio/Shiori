@@ -4,18 +4,17 @@ import Wenku8Core
 struct DiscoveryView: View {
     @EnvironmentObject var vm: StudioViewModel
 
-    private let quickChannels: [(title: String, path: String, icon: String)] = [
-        ("总点击榜", "/modules/article/toplist.php?sort=allvisit", "flame.fill"),
-        ("最近更新", "/modules/article/toplist.php?sort=lastupdate", "clock.arrow.circlepath"),
-        ("总推荐榜", "/modules/article/toplist.php?sort=allvote", "hand.thumbsup.fill"),
-        ("总收藏榜", "/modules/article/toplist.php?sort=goodnum", "bookmark.fill"),
-        ("周点击榜", "/modules/article/toplist.php?sort=weekvisit", "chart.line.uptrend.xyaxis"),
-        ("月点击榜", "/modules/article/toplist.php?sort=monthvisit", "calendar"),
-        ("新书一览", "/modules/article/toplist.php?sort=postdate", "sparkle"),
-        ("字数排行", "/modules/article/toplist.php?sort=size", "text.word.spacing"),
-        ("完结专区", "/modules/article/articlelist.php?fullflag=1", "checkmark.seal.fill"),
-        ("动画化作品", "/modules/article/toplist.php?sort=anime", "sparkles.tv"),
-    ]
+    private var activeSourceTitle: String {
+        if let filter = vm.selectedDiscoverySourceFilter,
+           let plugin = vm.sourceRegistry.plugin(for: filter) {
+            return plugin.descriptor.displayName
+        }
+        return vm.sourceRegistry.plugin(for: vm.activeDiscoverySourceId)?.descriptor.displayName ?? "轻小说文库"
+    }
+
+    private var currentChannelSourceId: String {
+        vm.selectedDiscoverySourceFilter ?? vm.activeDiscoverySourceId
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -52,17 +51,19 @@ struct DiscoveryView: View {
         .onAppear {
             if vm.discoveryBooks.isEmpty && vm.activeDiscoverySort.isEmpty && !vm.isLoadingDiscovery,
                let path = vm.defaultDiscoveryChannel.path {
-                vm.loadDiscoveryList(title: vm.defaultDiscoveryChannel.rawValue, path: path)
+                vm.loadDiscoveryList(title: vm.defaultDiscoveryChannel.rawValue, path: path, sourceId: "wenku8")
             }
         }
     }
 
     private var discoveryHeader: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let enabledPlugins = vm.sourceRegistry.enabledPlugins()
+        let channels = vm.activeDiscoveryChannels()
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
                 StudioSearchField(
                     icon: "magnifyingglass",
-                    placeholder: "搜索轻小说书名、作者名或输入书号...",
+                    placeholder: "搜索轻小说书名、作者名、书号或链接...",
                     text: $vm.searchQuery,
                     onSubmit: { vm.performDiscoverySearch() }
                 )
@@ -81,28 +82,60 @@ struct DiscoveryView: View {
                 }
             }
 
+            if enabledPlugins.count > 1 {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        StudioFilterChip(
+                            title: "全部渠道",
+                            systemImage: "square.stack.3d.up.fill",
+                            isSelected: vm.selectedDiscoverySourceFilter == nil
+                        ) {
+                            vm.setDiscoverySourceFilter(nil)
+                        }
+
+                        ForEach(enabledPlugins, id: \.descriptor.id) { plugin in
+                            let sid = plugin.descriptor.id
+                            StudioFilterChip(
+                                title: plugin.descriptor.displayName,
+                                systemImage: sid == "bilinovel" ? "sparkles.rectangle.stack" : "books.vertical",
+                                isSelected: vm.selectedDiscoverySourceFilter == sid
+                            ) {
+                                vm.setDiscoverySourceFilter(sid)
+                                vm.showTagBrowser = false
+                                if let disc = plugin as? any DiscoveryCapableSource,
+                                   let firstChannel = disc.discoveryChannels().first {
+                                    vm.loadDiscoveryList(title: firstChannel.title, path: firstChannel.path, sourceId: sid)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    StudioFilterChip(
-                        title: "Tags 标签云",
-                        systemImage: "tag.fill",
-                        isSelected: vm.showTagBrowser || vm.selectedTag != nil
-                    ) {
-                        withAnimation(.easeInOut(duration: 0.18)) {
-                            vm.showTagBrowser.toggle()
-                        }
-                        if vm.showTagBrowser && vm.tagGroups.isEmpty {
-                            vm.loadTagGroups()
+                    if currentChannelSourceId == "wenku8" {
+                        StudioFilterChip(
+                            title: "Tags 标签云",
+                            systemImage: "tag.fill",
+                            isSelected: vm.showTagBrowser || vm.selectedTag != nil
+                        ) {
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                vm.showTagBrowser.toggle()
+                            }
+                            if vm.showTagBrowser && vm.tagGroups.isEmpty {
+                                vm.loadTagGroups()
+                            }
                         }
                     }
 
-                    ForEach(quickChannels, id: \.path) { channel in
+                    ForEach(channels) { channel in
                         StudioFilterChip(
                             title: channel.title,
                             systemImage: channel.icon,
-                            isSelected: vm.activeDiscoverySort == channel.path
+                            isSelected: vm.activeDiscoverySort == channel.path && vm.activeDiscoverySourceId == channel.sourceId
                         ) {
-                            vm.loadDiscoveryList(title: channel.title, path: channel.path)
+                            vm.loadDiscoveryList(title: channel.title, path: channel.path, sourceId: channel.sourceId)
                         }
                     }
                 }
@@ -114,28 +147,41 @@ struct DiscoveryView: View {
     }
 
     private func noticeCard(_ notice: String) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: vm.discoveryRequiresCookie ? "person.badge.key.fill" : "info.circle.fill")
+        let challengeSourceId = vm.discoveryChallengeSourceId ?? "wenku8"
+        let isChallenge = vm.discoveryRequiresCookie
+        let titleText: String = {
+            if !isChallenge { return "提示" }
+            return challengeSourceId == "bilinovel"
+                ? "需要人机验证或登录会话"
+                : "需要登录账号以访问全站搜索与榜单"
+        }()
+
+        return HStack(spacing: 12) {
+            Image(systemName: isChallenge ? "person.badge.key.fill" : "info.circle.fill")
                 .font(.title3)
-                .foregroundStyle(vm.discoveryRequiresCookie ? .orange : .blue)
+                .foregroundStyle(isChallenge ? .orange : .blue)
             VStack(alignment: .leading, spacing: 3) {
-                Text(vm.discoveryRequiresCookie ? "需要登录账号以访问全站搜索与榜单" : "提示")
+                Text(titleText)
                     .font(.headline)
                 Text(notice)
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            if vm.discoveryRequiresCookie {
-                StudioPillButton(title: "前往设置登录", systemImage: "gearshape", variant: .primary, size: .small) {
-                    vm.navigateToSettingsCategory(.account)
+            if isChallenge {
+                StudioPillButton(title: "前往配置", systemImage: "gearshape", variant: .primary, size: .small) {
+                    if challengeSourceId == "wenku8" {
+                        vm.navigateToSettingsCategory(.account)
+                    } else {
+                        vm.navigateToSettingsCategory(.source(challengeSourceId))
+                    }
                 }
-                StudioPillButton(title: "网页登录", systemImage: "safari", size: .small) {
-                    vm.showWebLoginSheet = true
+                StudioPillButton(title: "网页登录 / 验证", systemImage: "safari", size: .small) {
+                    vm.openWebLogin(for: challengeSourceId)
                 }
             }
         }
-        .studioCard(cornerRadius: StudioTokens.cardRadius, padding: 14, tint: vm.discoveryRequiresCookie ? .orange : .blue)
+        .studioCard(cornerRadius: StudioTokens.cardRadius, padding: 14, tint: isChallenge ? .orange : .blue)
     }
 
     private func sectionHeader(_ title: String, count: Int) -> some View {
@@ -256,10 +302,20 @@ struct DiscoveryView: View {
 
     private func discoveryGrid(_ items: [AuthorBookItem]) -> some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 340, maximum: 500), spacing: 14)], spacing: 14) {
-            ForEach(items) { item in
+            ForEach(items, id: \.scopedId) { item in
                 BookItemCard(
                     item: BookCardItem(authorItem: item),
+                    sourceBadgeTitle: vm.sourceBadgeTitle(for: item.sourceId),
+                    isBookmarked: vm.isBookmarked(item.id, sourceId: item.sourceId),
                     showBookmarkButton: true,
+                    showSummary: vm.showCardSummary,
+                    isCompact: vm.compactBookCards,
+                    onOpen: {
+                        vm.loadBook(inputOverride: item.id, sourceIdOverride: item.sourceId)
+                    },
+                    onOpenAuthor: { author in
+                        vm.loadAuthorWorks(author: author, sourceId: item.sourceId)
+                    },
                     onToggleBookmark: {
                         vm.toggleBookmarkFromAuthorItem(item)
                     }
@@ -270,7 +326,7 @@ struct DiscoveryView: View {
 
     private func recommendationsGrid(_ items: [RecommendedBook]) -> some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 220, maximum: 300), spacing: 14)], spacing: 14) {
-            ForEach(items) { rec in
+            ForEach(items, id: \.scopedId) { rec in
                 RecommendedBookCard(rec: rec)
             }
         }
@@ -281,19 +337,21 @@ struct DiscoveryView: View {
             Image(systemName: "sparkles.rectangle.stack")
                 .font(.system(size: 46))
                 .foregroundStyle(.secondary)
-            Text("探索轻小说文库")
+            Text("探索轻小说书库 · \(activeSourceTitle)")
                 .font(.title3.weight(.semibold))
-            Text("可直接搜索作者名或书号，也可点击上方榜单发现热门作品与完结好书。")
+            Text("可直接搜索作者名、书名或书号，也可切换上方渠道或点击榜单发现热门与完结好书。")
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 460)
             HStack(spacing: 10) {
-                StudioPillButton(title: "浏览总点击榜", systemImage: "flame.fill", variant: .primary) {
-                    vm.loadDiscoveryList(title: "总点击榜", path: "/modules/article/toplist.php?sort=allvisit")
+                if let firstChannel = vm.activeDiscoveryChannels().first {
+                    StudioPillButton(title: "浏览\(firstChannel.title)", systemImage: firstChannel.icon, variant: .primary) {
+                        vm.loadDiscoveryList(title: firstChannel.title, path: firstChannel.path, sourceId: firstChannel.sourceId)
+                    }
                 }
 
                 StudioPillButton(title: "搜索作者「猫玄」", systemImage: "person.fill") {
-                    vm.loadAuthorWorks(author: "猫玄")
+                    vm.loadAuthorWorks(author: "猫玄", sourceId: currentChannelSourceId)
                 }
             }
         }
@@ -310,21 +368,11 @@ private struct RecommendedBookCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             ZStack(alignment: .topTrailing) {
-                Group {
-                    if let img = vm.coverImageCache[rec.coverURL] {
-                        Image(nsImage: img)
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                    } else {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 10)
-                                .fill(Color.secondary.opacity(0.15))
-                            Image(systemName: "book.closed.fill")
-                                .font(.title2)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
+                AsyncCoverThumbnail(
+                    urlString: rec.coverURL,
+                    sourceId: rec.sourceId,
+                    maxPixelSize: 320
+                )
                 .frame(height: 180)
                 .frame(maxWidth: .infinity)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -349,20 +397,17 @@ private struct RecommendedBookCard: View {
                 .foregroundStyle(.secondary)
         }
         .padding(12)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 14))
         .overlay {
             RoundedRectangle(cornerRadius: 14)
-                .strokeBorder(isHovered ? Color.accentColor.opacity(0.45) : Color.clear, lineWidth: 1.5)
+                .strokeBorder(isHovered ? Color.accentColor.opacity(0.45) : StudioTokens.hairlineStroke, lineWidth: isHovered ? 1.4 : 0.8)
         }
         .contentShape(RoundedRectangle(cornerRadius: 14))
         .onHover { hovering in
             isHovered = hovering
         }
         .onTapGesture {
-            vm.loadBook(inputOverride: rec.id)
-        }
-        .onAppear {
-            vm.ensureCoverLoaded(urlString: rec.coverURL)
+            vm.loadBook(inputOverride: rec.id, sourceIdOverride: rec.sourceId)
         }
     }
 }

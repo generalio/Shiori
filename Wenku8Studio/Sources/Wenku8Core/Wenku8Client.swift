@@ -4,6 +4,7 @@ import Foundation
 
 public enum Wenku8Error: LocalizedError, Sendable {
     case invalidBookInput(String)
+    case bookNotFound(String)
     case cloudflareBlocked(String)
     case httpError(Int, String)
     case parseError(String)
@@ -13,8 +14,15 @@ public enum Wenku8Error: LocalizedError, Sendable {
     public var errorDescription: String? {
         switch self {
         case .invalidBookInput(let msg): return "无效输入：\(msg)"
+        case .bookNotFound(let msg): return msg
         case .cloudflareBlocked(let url): return "访问受限（Cloudflare 拦截）：\(url)"
-        case .httpError(let code, let url): return "HTTP \(code) 请求失败：\(url)"
+        case .httpError(let code, let url):
+            switch code {
+            case 404: return "请求的书籍或页面不存在（HTTP 404）：\(url)"
+            case 403: return "站点拒绝访问（HTTP 403）：\(url)"
+            case 500...599: return "站点服务器暂时不可用（HTTP \(code)）：\(url)"
+            default: return "HTTP \(code) 请求失败：\(url)"
+            }
         case .parseError(let msg): return "页面解析失败：\(msg)"
         case .networkError(let msg): return "网络请求失败：\(msg)"
         case .loginRequired(let msg): return msg
@@ -407,6 +415,15 @@ public actor Wenku8Client {
             do {
                 let bookURL = "\(candidateBase)/book/\(bookId).htm"
                 let mainHTML = try await fetchHTML(urlString: bookURL, referer: candidateBase, delay: false)
+                if let siteMsg = Self.detectSiteErrorMessage(html: mainHTML) {
+                    if siteMsg.contains("不存在") || siteMsg.contains("没有") || siteMsg.contains("找不到") {
+                        throw Wenku8Error.bookNotFound("未找到书号 \(bookId) 对应的作品（\(siteMsg)）")
+                    }
+                    if siteMsg.contains("登录") {
+                        throw Wenku8Error.loginRequired(siteMsg)
+                    }
+                    throw Wenku8Error.parseError(siteMsg)
+                }
                 let parsedBook = try Self.parseBookPage(html: mainHTML, bookURL: bookURL, baseURL: candidateBase)
 
                 let catalogHTML = try await fetchHTML(urlString: parsedBook.catalogURL, referer: bookURL, delay: true)
@@ -435,6 +452,18 @@ public actor Wenku8Client {
                 )
             } catch is CancellationError {
                 throw CancellationError()
+            } catch let err as Wenku8Error {
+                // Authoritative site-level errors (book not found, invalid input, login required, 404)
+                // should surface directly instead of falling back to another mirror that may hit Cloudflare.
+                switch err {
+                case .bookNotFound, .invalidBookInput, .loginRequired:
+                    throw err
+                case .httpError(let code, _) where code == 404:
+                    throw Wenku8Error.bookNotFound("未找到书号 \(bookId) 对应的作品（HTTP 404）")
+                default:
+                    lastError = err
+                    continue
+                }
             } catch {
                 lastError = error
                 continue
@@ -806,6 +835,33 @@ public actor Wenku8Client {
         var allowed = CharacterSet.alphanumerics
         allowed.insert(charactersIn: "-._*")
         return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+    }
+
+    public static func detectSiteErrorMessage(html: String) -> String? {
+        let isErrorPage = html.contains("<title>出现错误</title>")
+            || html.contains("blocktitle\">出现错误")
+            || html.contains("错误原因：")
+            || html.contains("对不起，该文章不存在")
+        guard isErrorPage else {
+            return nil
+        }
+        let rawMsg = extractBlockContentText(html: html)
+        if !rawMsg.isEmpty {
+            var cleaned = rawMsg
+                .replacingOccurrences(of: "错误原因：", with: "")
+                .replacingOccurrences(of: "[关闭本窗口]", with: "")
+            if let r = cleaned.range(of: #"请\s*返\s*回"#, options: .regularExpression) {
+                cleaned = String(cleaned[..<r.lowerBound])
+            }
+            cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !cleaned.isEmpty {
+                return cleaned
+            }
+        }
+        if html.contains("对不起，该文章不存在") {
+            return "对不起，该文章不存在！"
+        }
+        return nil
     }
 
     private static func extractBlockContentText(html: String) -> String {

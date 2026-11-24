@@ -306,7 +306,7 @@ struct ReaderPreviewView: View {
     private func scrollReaderBody(_ content: ChapterContent) -> some View {
         ScrollViewReader { scrollProxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: vm.readerParagraphSpacing) {
+                LazyVStack(alignment: .leading, spacing: vm.readerParagraphSpacing) {
                     Color.clear
                         .frame(height: 1)
                         .id("readerTop")

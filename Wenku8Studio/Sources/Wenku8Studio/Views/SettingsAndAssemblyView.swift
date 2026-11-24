@@ -20,6 +20,10 @@ struct SettingsAndAssemblyView: View {
         [.about]
     }
 
+    private var sourceCategories: [SettingsCategory] {
+        vm.sourceRegistry.allPlugins().map { .source($0.descriptor.id) }
+    }
+
     private func matchesSearch(_ category: SettingsCategory) -> Bool {
         let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !q.isEmpty else { return true }
@@ -31,7 +35,14 @@ struct SettingsAndAssemblyView: View {
             .assembly: "epub 拼装 封面 彩插 排版 清洗 缩进 模板 文件名",
             .about: "关于 版本 更新 github 重置 恢复默认"
         ]
-        let corpus = "\(category.rawValue) \(category.subtitle) \(keywords[category] ?? "")".lowercased()
+        let pluginExtra: String = {
+            if case .source(let sid) = category,
+               let desc = vm.sourceRegistry.plugin(for: sid)?.descriptor {
+                return "\(desc.displayName) \(desc.subtitle) \(desc.id) 书源 插件"
+            }
+            return ""
+        }()
+        let corpus = "\(category.title) \(category.subtitle) \(keywords[category] ?? "") \(pluginExtra)".lowercased()
         return corpus.contains(q)
     }
 
@@ -60,6 +71,8 @@ struct SettingsAndAssemblyView: View {
                         assemblySettingsContent
                     case .about:
                         aboutSettingsContent
+                    case .source(let sourceId):
+                        sourceSettingsContent(sourceId: sourceId)
                     }
                 }
                 .padding(.horizontal, 28)
@@ -104,6 +117,7 @@ struct SettingsAndAssemblyView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     categoryListGroup(title: nil, items: primaryCategories.filter(matchesSearch))
+                    categoryListGroup(title: "书源平台", items: sourceCategories.filter(matchesSearch))
                     categoryListGroup(title: "内容与构建", items: secondaryCategories.filter(matchesSearch))
                     categoryListGroup(title: nil, items: infoCategories.filter(matchesSearch))
                 }
@@ -147,7 +161,7 @@ struct SettingsAndAssemblyView: View {
                         .strokeBorder(StudioTokens.hairlineStroke, lineWidth: 0.8)
                 }
 
-                Text("Wenku8 Studio \(vm.appVersionDisplay) (\(vm.buildNumberDisplay))")
+                Text("Shiori Studio \(vm.appVersionDisplay) (\(vm.buildNumberDisplay))")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .padding(.horizontal, 6)
@@ -168,9 +182,16 @@ struct SettingsAndAssemblyView: View {
                         .padding(.bottom, 2)
                 }
                 ForEach(items) { cat in
+                    let sourceEnabled: Bool? = {
+                        if case .source(let sid) = cat {
+                            return vm.sourceConfig(for: sid).isEnabled
+                        }
+                        return nil
+                    }()
                     SettingsCategorySidebarRow(
                         category: cat,
-                        isSelected: vm.activeSettingsCategory == cat
+                        isSelected: vm.activeSettingsCategory == cat,
+                        sourceEnabled: sourceEnabled
                     ) {
                         vm.activeSettingsCategory = cat
                     }
@@ -191,7 +212,7 @@ struct SettingsAndAssemblyView: View {
             }
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(category.rawValue)
+                Text(category.title)
                     .font(.title2.weight(.bold))
                 Text(category.subtitle)
                     .font(.caption)
@@ -327,7 +348,7 @@ struct SettingsAndAssemblyView: View {
             }
 
             SettingsCardGroup(title: "自定义启动与页面") {
-                SettingsRow(title: "应用默认启动页", subtitle: "启动 Wenku8 Studio 时默认呈现的功能工作区") {
+                SettingsRow(title: "应用默认启动页", subtitle: "启动 Shiori Studio 时默认呈现的功能工作区") {
                     let startupCandidates = SidebarSection.allCases.filter { vm.isSidebarSectionVisible($0) && $0 != .settings }
                     Picker("", selection: $vm.startupSection) {
                         ForEach(startupCandidates) { sec in
@@ -572,7 +593,7 @@ struct SettingsAndAssemblyView: View {
                             variant: .primary,
                             size: .small
                         ) {
-                            vm.showWebLoginSheet = true
+                            vm.openWebLogin(for: "wenku8")
                         }
 
                         StudioPillButton(
@@ -597,7 +618,7 @@ struct SettingsAndAssemblyView: View {
 
                         if !vm.customCookie.isEmpty {
                             StudioPillButton(title: "清空", systemImage: "trash", variant: .destructive, size: .small) {
-                                vm.clearSavedCookie()
+                                vm.clearSavedCookie(for: "wenku8")
                             }
                         }
                     }
@@ -886,12 +907,12 @@ struct SettingsAndAssemblyView: View {
                     appIconView(size: 62)
 
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Wenku8 Studio")
+                        Text("Shiori Studio")
                             .font(.title3.weight(.bold))
                         Text("版本 \(vm.appVersionDisplay) (\(vm.buildNumberDisplay))")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        Text("为 macOS 打造的轻小说文库阅读器与 EPUB 电子书制作工具")
+                        Text("为 macOS 打造的轻小说多书源聚合阅读器与 EPUB 出版拼装工坊")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                     }
@@ -963,6 +984,169 @@ struct SettingsAndAssemblyView: View {
         }
     }
 
+    // MARK: - 7. 书源平台配置 (Plugin Source)
+
+    @ViewBuilder
+    private func sourceSettingsContent(sourceId: String) -> some View {
+        let plugin = vm.sourceRegistry.plugin(for: sourceId)
+        let cfgBinding = Binding<SourceRuntimeConfig>(
+            get: { vm.sourceConfig(for: sourceId) },
+            set: { newVal in
+                vm.updateSourceConfig(newVal)
+                vm.savePersistedState()
+            }
+        )
+
+        if let desc = plugin?.descriptor {
+            VStack(alignment: .leading, spacing: 18) {
+                SettingsCardGroup(title: "插件信息与状态") {
+                    HStack(spacing: 14) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill((sourceId == "bilinovel" ? Color.pink : studioAccent).opacity(0.14))
+                                .frame(width: 48, height: 48)
+                            Image(systemName: sourceId == "bilinovel" ? "sparkles.rectangle.stack.fill" : "books.vertical.fill")
+                                .font(.system(size: 20, weight: .semibold))
+                                .foregroundStyle(sourceId == "bilinovel" ? Color.pink : studioAccent)
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 8) {
+                                Text(desc.displayName)
+                                    .font(.headline)
+                                StudioSourceBadge(title: desc.shortBadge, sourceId: desc.id)
+                                Text(desc.requiresBrowserRuntime ? "WKWebView 浏览器运行时" : "原生 HTTP 运行时")
+                                    .font(.caption2.weight(.medium))
+                                    .padding(.horizontal, 7)
+                                    .padding(.vertical, 2)
+                                    .background(Color.secondary.opacity(0.12), in: Capsule())
+                            }
+                            Text(desc.subtitle)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer()
+
+                        Toggle("", isOn: cfgBinding.isEnabled)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                    }
+                    .padding(16)
+                }
+
+                SettingsCardGroup(title: "镜像地址与请求限速") {
+                    SettingsRow(title: "主站与镜像域名", subtitle: "可在官方域名间快速切换或填写自定义镜像地址") {
+                        VStack(alignment: .trailing, spacing: 8) {
+                            HStack(spacing: 6) {
+                                ForEach(desc.defaultMirrors, id: \.self) { mirror in
+                                    let host = mirror.replacingOccurrences(of: "https://", with: "")
+                                    StudioFilterChip(
+                                        title: host,
+                                        isSelected: cfgBinding.wrappedValue.baseURL.lowercased() == mirror.lowercased()
+                                    ) {
+                                        var updated = cfgBinding.wrappedValue
+                                        updated.baseURL = mirror
+                                        cfgBinding.wrappedValue = updated
+                                    }
+                                }
+                            }
+                            TextField("https://...", text: cfgBinding.baseURL)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 280)
+                        }
+                    }
+
+                    Divider()
+
+                    SettingsRow(title: "礼貌请求间隔", subtitle: "每次页面或章节抓取之间的最小间隔，降低触发风控概率") {
+                        HStack(spacing: 10) {
+                            Slider(value: cfgBinding.politeDelaySeconds, in: 0.0...4.0, step: 0.25)
+                                .frame(width: 160)
+                            Text(String(format: "%.2fs", cfgBinding.wrappedValue.politeDelaySeconds))
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .frame(width: 44, alignment: .trailing)
+                        }
+                    }
+                }
+
+                SettingsCardGroup(title: "会话验证与 Cookie") {
+                    SettingsRow(
+                        title: "内置网页登录 / 人机验证",
+                        subtitle: sourceId == "bilinovel"
+                            ? "若遇到 Cloudflare 人机验证或章节限制，点击左侧按钮在可视浏览器完成验证后自动同步会话"
+                            : "通过内置浏览器登录以解锁全站搜索、云端书架与高阶功能"
+                    ) {
+                        HStack(spacing: 8) {
+                            StudioPillButton(
+                                title: sourceId == "bilinovel" ? "网页验证 / 登录" : "网页登录",
+                                systemImage: "safari",
+                                variant: .primary,
+                                size: .small
+                            ) {
+                                vm.openWebLogin(for: sourceId)
+                            }
+
+                            StudioPillButton(
+                                title: "检测连接",
+                                systemImage: "checkmark.shield",
+                                size: .small
+                            ) {
+                                vm.testSourceSession(sourceId: sourceId)
+                            }
+
+                            if !cfgBinding.wrappedValue.cookie.isEmpty {
+                                StudioPillButton(
+                                    title: "清空",
+                                    systemImage: "trash",
+                                    variant: .destructive,
+                                    size: .small
+                                ) {
+                                    vm.clearSavedCookie(for: sourceId)
+                                }
+                            }
+                        }
+                    }
+
+                    if let msg = vm.perSourceVerifyMessage[sourceId], !msg.isEmpty {
+                        let passed = vm.perSourceVerifyPassed[sourceId] == true
+                        Divider()
+                        HStack(spacing: 8) {
+                            Image(systemName: passed ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                .foregroundStyle(passed ? .green : .orange)
+                            Text(msg)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                    }
+
+                    if vm.showAdvancedSettings {
+                        Divider()
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("手动 Cookie（仅限当前书源）")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.secondary)
+                            TextEditor(text: cfgBinding.cookie)
+                                .font(.caption.monospaced())
+                                .frame(height: 62)
+                                .padding(6)
+                                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .strokeBorder(StudioTokens.hairlineStroke, lineWidth: 0.8)
+                                }
+                        }
+                        .padding(16)
+                    }
+                }
+            }
+        }
+    }
+
     private func appIconView(size: CGFloat) -> some View {
         Group {
             if let nsImg = NSImage(named: "AppIcon") ?? NSApp.applicationIconImage {
@@ -1009,6 +1193,7 @@ struct SettingsAndAssemblyView: View {
 private struct SettingsCategorySidebarRow: View {
     let category: SettingsCategory
     let isSelected: Bool
+    var sourceEnabled: Bool? = nil
     let action: () -> Void
 
     @Environment(\.studioAccentColor) private var studioAccent
@@ -1023,12 +1208,27 @@ private struct SettingsCategorySidebarRow: View {
                     .foregroundStyle(isSelected ? studioAccent : Color.secondary)
                     .frame(width: 18, height: 18)
 
-                Text(category.rawValue)
+                Text(category.title)
                     .font(.callout.weight(isSelected ? .semibold : .regular))
                     .foregroundStyle(isSelected ? Color.primary : Color.primary.opacity(0.85))
                     .lineLimit(1)
 
                 Spacer()
+
+                if let sourceEnabled {
+                    if sourceEnabled {
+                        Circle()
+                            .fill(.green)
+                            .frame(width: 6, height: 6)
+                    } else {
+                        Text("待启用")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 1.5)
+                            .background(Color.primary.opacity(0.06), in: Capsule())
+                    }
+                }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 7)

@@ -3,7 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-APP_NAME="Wenku8Studio"
+APP_NAME="ShioriStudio"
+SCHEME_NAME="Wenku8Studio"
 APP_BUNDLE="$ROOT_DIR/$APP_NAME.app"
 DERIVED_DIR="$SCRIPT_DIR/.build_xcode"
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
@@ -14,8 +15,8 @@ xcodegen generate
 
 echo "Building $APP_NAME with Xcode (Liquid Glass + Asset Catalog AppIcon)..."
 xcodebuild \
-  -project "$SCRIPT_DIR/$APP_NAME.xcodeproj" \
-  -scheme "$APP_NAME" \
+  -project "$SCRIPT_DIR/$SCHEME_NAME.xcodeproj" \
+  -scheme "$SCHEME_NAME" \
   -configuration Release \
   -sdk macosx \
   -derivedDataPath "$DERIVED_DIR" \

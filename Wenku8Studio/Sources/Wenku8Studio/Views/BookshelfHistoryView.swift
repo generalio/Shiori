@@ -153,7 +153,7 @@ struct BookshelfHistoryView: View {
                         .foregroundStyle(.secondary)
                     Spacer()
                     StudioPillButton(title: "网页登录", systemImage: "safari", variant: .primary, size: .small) {
-                        vm.showWebLoginSheet = true
+                        vm.openWebLogin(for: "wenku8")
                     }
                 }
                 .studioCard(cornerRadius: 12, padding: 12, tint: .orange)
@@ -171,7 +171,7 @@ struct BookshelfHistoryView: View {
             }
 
             if items.isEmpty {
-                Text("书架暂无藏书，可在书籍详情页或发现页点击「加入书架」（已登录时直推云端）")
+                Text("书架暂无藏书，可在书籍详情页或发现页点击「加入书架」（轻小说文库已登录时直推云端）")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .center)
@@ -179,22 +179,32 @@ struct BookshelfHistoryView: View {
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
             } else {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 340, maximum: 500), spacing: 14)], spacing: 14) {
-                    ForEach(items) { entry in
-                        let live = (vm.bookDetail?.bookId == entry.id) ? vm.bookDetail : nil
+                    ForEach(items, id: \.scopedId) { entry in
+                        let live = (vm.bookDetail?.bookId == entry.id && vm.bookDetail?.sourceId == entry.sourceId) ? vm.bookDetail : nil
                         BookItemCard(
                             item: BookCardItem(entry: entry, liveDetail: live),
+                            sourceBadgeTitle: vm.sourceBadgeTitle(for: entry.sourceId),
+                            isBookmarked: true,
                             showBookmarkButton: false,
                             showSyncBadge: true,
-                            deleteTooltip: vm.isCloudSessionAvailable ? "移出书架（同步从云端删除）" : "移出本地书架",
+                            showSummary: vm.showCardSummary,
+                            isCompact: vm.compactBookCards,
+                            deleteTooltip: (entry.sourceId == "wenku8" && vm.isCloudSessionAvailable) ? "移出书架（同步从云端删除）" : "移出本地书架",
+                            onOpen: {
+                                vm.loadBook(inputOverride: entry.id, sourceIdOverride: entry.sourceId)
+                            },
+                            onOpenAuthor: { author in
+                                vm.loadAuthorWorks(author: author, sourceId: entry.sourceId)
+                            },
                             onDelete: {
                                 withAnimation {
-                                    vm.removeBookmark(id: entry.id)
+                                    vm.removeBookmark(id: entry.id, sourceId: entry.sourceId)
                                 }
                             },
                             onResumeChapter: entry.cloudChapterId.isEmpty ? nil : {
                                 vm.openBookmarkChapter(entry)
                             },
-                            cloudGroups: vm.isCloudSessionAvailable ? vm.cloudBookcaseGroups : [],
+                            cloudGroups: (entry.sourceId == "wenku8" && vm.isCloudSessionAvailable) ? vm.cloudBookcaseGroups : [],
                             onMoveCloudGroup: { targetGroupId in
                                 vm.moveBookmarkToCloudGroup(entry, toClassId: targetGroupId)
                             }
@@ -234,15 +244,25 @@ struct BookshelfHistoryView: View {
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
             } else {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 340, maximum: 500), spacing: 14)], spacing: 14) {
-                    ForEach(items) { entry in
-                        let live = (vm.bookDetail?.bookId == entry.id) ? vm.bookDetail : nil
+                    ForEach(items, id: \.scopedId) { entry in
+                        let live = (vm.bookDetail?.bookId == entry.id && vm.bookDetail?.sourceId == entry.sourceId) ? vm.bookDetail : nil
                         BookItemCard(
                             item: BookCardItem(entry: entry, liveDetail: live),
+                            sourceBadgeTitle: vm.sourceBadgeTitle(for: entry.sourceId),
+                            isBookmarked: vm.isBookmarked(entry.id, sourceId: entry.sourceId),
                             showBookmarkButton: true,
+                            showSummary: vm.showCardSummary,
+                            isCompact: vm.compactBookCards,
                             deleteTooltip: "删除此条浏览记录",
+                            onOpen: {
+                                vm.loadBook(inputOverride: entry.id, sourceIdOverride: entry.sourceId)
+                            },
+                            onOpenAuthor: { author in
+                                vm.loadAuthorWorks(author: author, sourceId: entry.sourceId)
+                            },
                             onDelete: {
                                 withAnimation {
-                                    vm.removeHistoryItem(id: entry.id)
+                                    vm.removeHistoryItem(id: entry.id, sourceId: entry.sourceId)
                                 }
                             },
                             onToggleBookmark: {

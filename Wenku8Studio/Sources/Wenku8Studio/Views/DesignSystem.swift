@@ -75,6 +75,19 @@ enum StudioControlSize {
     }
 }
 
+// MARK: - Press Scale ButtonStyle (Scroll-Safe)
+
+struct StudioPressScaleStyle: ButtonStyle {
+    var pressedScale: CGFloat = 0.95
+    var isDisabled: Bool = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(!isDisabled && configuration.isPressed ? pressedScale : 1.0)
+            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+    }
+}
+
 // MARK: - Circular Shadow Icon Button
 
 struct StudioCircleButton: View {
@@ -88,7 +101,6 @@ struct StudioCircleButton: View {
 
     @Environment(\.studioAccentColor) private var studioAccent
     @State private var isHovered = false
-    @State private var isPressed = false
 
     private var diameter: CGFloat { size.circleDiameter }
 
@@ -122,29 +134,16 @@ struct StudioCircleButton: View {
                 }
             }
             .frame(width: diameter, height: diameter)
-            .scaleEffect(isPressed ? 0.93 : (isHovered && !isDisabled ? 1.04 : 1.0))
-            .opacity(isDisabled ? 0.42 : 1.0)
+            .scaleEffect(isHovered && !isDisabled ? 1.04 : 1.0)
             .contentShape(Circle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(StudioPressScaleStyle(pressedScale: 0.93, isDisabled: isDisabled))
         .disabled(isDisabled || isLoading)
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.14)) {
                 isHovered = hovering
             }
         }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in
-                    guard !isDisabled else { return }
-                    if !isPressed {
-                        withAnimation(.easeOut(duration: 0.08)) { isPressed = true }
-                    }
-                }
-                .onEnded { _ in
-                    withAnimation(.easeOut(duration: 0.14)) { isPressed = false }
-                }
-        )
         .accessibilityLabel(accessibilityLabel ?? systemImage)
     }
 
@@ -157,6 +156,9 @@ struct StudioCircleButton: View {
     }
 
     private var backgroundFill: AnyShapeStyle {
+        if isDisabled {
+            return AnyShapeStyle(Color.primary.opacity(0.075))
+        }
         switch variant {
         case .primary:
             return AnyShapeStyle(
@@ -168,19 +170,19 @@ struct StudioCircleButton: View {
             )
         case .secondary:
             return AnyShapeStyle(
-                isHovered && !isDisabled
+                isHovered
                     ? Color(nsColor: .controlBackgroundColor)
                     : Color(nsColor: .controlBackgroundColor).opacity(0.86)
             )
         case .subtle:
             return AnyShapeStyle(
-                isHovered && !isDisabled
+                isHovered
                     ? Color.primary.opacity(0.08)
                     : Color.clear
             )
         case .destructive:
             return AnyShapeStyle(
-                isHovered && !isDisabled
+                isHovered
                     ? Color.red.opacity(0.16)
                     : Color(nsColor: .controlBackgroundColor).opacity(0.82)
             )
@@ -188,6 +190,9 @@ struct StudioCircleButton: View {
     }
 
     private var foregroundColor: Color {
+        if isDisabled {
+            return Color.primary.opacity(0.42)
+        }
         switch variant {
         case .primary: return .white
         case .secondary: return .primary
@@ -197,6 +202,9 @@ struct StudioCircleButton: View {
     }
 
     private var borderColor: Color {
+        if isDisabled {
+            return variant == .subtle ? .clear : StudioTokens.hairlineStroke
+        }
         switch variant {
         case .primary: return Color.white.opacity(0.22)
         case .secondary: return StudioTokens.hairlineStroke
@@ -228,7 +236,6 @@ struct StudioPillButton: View {
 
     @Environment(\.studioAccentColor) private var studioAccent
     @State private var isHovered = false
-    @State private var isPressed = false
 
     var body: some View {
         Button {
@@ -263,32 +270,21 @@ struct StudioPillButton: View {
                 x: 0,
                 y: isHovered && !isDisabled ? 3 : 1.5
             )
-            .scaleEffect(isPressed ? 0.97 : 1.0)
-            .opacity(isDisabled ? 0.45 : 1.0)
             .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(StudioPressScaleStyle(pressedScale: 0.97, isDisabled: isDisabled))
         .disabled(isDisabled || isLoading)
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.14)) {
                 isHovered = hovering
             }
         }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in
-                    guard !isDisabled else { return }
-                    if !isPressed {
-                        withAnimation(.easeOut(duration: 0.08)) { isPressed = true }
-                    }
-                }
-                .onEnded { _ in
-                    withAnimation(.easeOut(duration: 0.14)) { isPressed = false }
-                }
-        )
     }
 
     private var backgroundFill: AnyShapeStyle {
+        if isDisabled {
+            return AnyShapeStyle(Color.primary.opacity(0.075))
+        }
         switch variant {
         case .primary:
             return AnyShapeStyle(
@@ -300,19 +296,19 @@ struct StudioPillButton: View {
             )
         case .secondary:
             return AnyShapeStyle(
-                isHovered && !isDisabled
+                isHovered
                     ? Color(nsColor: .controlBackgroundColor)
                     : Color(nsColor: .controlBackgroundColor).opacity(0.84)
             )
         case .subtle:
             return AnyShapeStyle(
-                isHovered && !isDisabled
+                isHovered
                     ? Color.primary.opacity(0.08)
                     : Color.primary.opacity(0.03)
             )
         case .destructive:
             return AnyShapeStyle(
-                isHovered && !isDisabled
+                isHovered
                     ? Color.red.opacity(0.18)
                     : Color.red.opacity(0.10)
             )
@@ -320,6 +316,9 @@ struct StudioPillButton: View {
     }
 
     private var foregroundColor: Color {
+        if isDisabled {
+            return Color.primary.opacity(0.45)
+        }
         switch variant {
         case .primary: return .white
         case .secondary: return .primary
@@ -329,6 +328,9 @@ struct StudioPillButton: View {
     }
 
     private var borderColor: Color {
+        if isDisabled {
+            return StudioTokens.hairlineStroke
+        }
         switch variant {
         case .primary: return Color.white.opacity(0.20)
         case .secondary: return StudioTokens.hairlineStroke
@@ -734,6 +736,32 @@ private struct StudioMenuRow: View {
         .onHover { hovering in
             isHovered = hovering
         }
+    }
+}
+
+// MARK: - Source Platform Badge
+
+struct StudioSourceBadge: View {
+    let title: String
+    var sourceId: String = "wenku8"
+
+    @Environment(\.studioAccentColor) private var studioAccent
+
+    private var badgeTint: Color {
+        sourceId == "bilinovel" ? Color.pink : studioAccent
+    }
+
+    var body: some View {
+        Text(title)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(badgeTint)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2.5)
+            .background(badgeTint.opacity(0.13), in: Capsule())
+            .overlay {
+                Capsule()
+                    .strokeBorder(badgeTint.opacity(0.24), lineWidth: 0.7)
+            }
     }
 }
 

@@ -476,4 +476,296 @@ final class Wenku8CoreTests: XCTestCase {
         XCTAssertFalse(hits.isEmpty)
         XCTAssertEqual(ReaderPaginator.convertScript("简体中文", mode: .traditional), "簡體中文")
     }
+
+    func testScopedBookIDAndLegacyJSONDecoding() throws {
+        let bare = ScopedBookID.parse("3115")
+        XCTAssertEqual(bare.sourceId, "wenku8")
+        XCTAssertEqual(bare.bookId, "3115")
+        XCTAssertEqual(bare.rawKey, "wenku8:3115")
+
+        let explicit = ScopedBookID.parse("bilinovel:2704")
+        XCTAssertEqual(explicit.sourceId, "bilinovel")
+        XCTAssertEqual(explicit.bookId, "2704")
+
+        // Legacy BookmarkEntry JSON without `sourceId` must decode cleanly as `"wenku8"`
+        let legacyBookmarkJSON = """
+        {
+          "id": "2784",
+          "title": "弹珠汽水瓶里的千岁同学",
+          "author": "裕梦",
+          "coverURL": "https://img.wenku8.com/2784.jpg",
+          "publisher": "小学馆",
+          "status": "连载中",
+          "addedAt": 750000000
+        }
+        """.data(using: .utf8)!
+        let entry = try JSONDecoder().decode(BookmarkEntry.self, from: legacyBookmarkJSON)
+        XCTAssertEqual(entry.sourceId, "wenku8")
+        XCTAssertEqual(entry.scopedId, "wenku8:2784")
+
+        // Legacy ReaderBookmarkNote JSON without `sourceId` must decode cleanly as `"wenku8"`
+        let legacyNoteJSON = """
+        {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "bookId": "2784",
+          "chapterId": "c1",
+          "chapterTitle": "第一章",
+          "pageIndex": 2,
+          "progressRatio": 0.25,
+          "excerpt": "测试摘录",
+          "createdAt": 750000000
+        }
+        """.data(using: .utf8)!
+        let note = try JSONDecoder().decode(ReaderBookmarkNote.self, from: legacyNoteJSON)
+        XCTAssertEqual(note.sourceId, "wenku8")
+    }
+
+    func testSourceRegistryURLAndInputRouting() {
+        let registry = SourceRegistry.makeDefaultRegistry()
+        XCTAssertEqual(registry.allPlugins().map(\.descriptor.id), ["wenku8", "bilinovel"])
+        XCTAssertTrue(registry.isEnabled("wenku8"))
+        XCTAssertFalse(registry.isEnabled("bilinovel"))
+
+        let wRoute = registry.routeBookInput("https://www.wenku8.cc/book/3115.htm")
+        XCTAssertEqual(wRoute?.plugin.descriptor.id, "wenku8")
+        XCTAssertEqual(wRoute?.bookId, "3115")
+
+        // Disabled by default -> not routed until hot-enabled
+        XCTAssertNil(registry.routeBookInput("https://www.linovelib.com/novel/2704.html"))
+
+        // Hot-enable bilinovel plugin -> routing works immediately
+        registry.setEnabled(true, for: "bilinovel")
+        let bRoute1 = registry.routeBookInput("https://www.linovelib.com/novel/2704.html")
+        XCTAssertEqual(bRoute1?.plugin.descriptor.id, "bilinovel")
+        XCTAssertEqual(bRoute1?.bookId, "2704")
+
+        let bRoute2 = registry.routeBookInput("https://www.bilinovel.com/novel/1234/catalog")
+        XCTAssertEqual(bRoute2?.plugin.descriptor.id, "bilinovel")
+        XCTAssertEqual(bRoute2?.bookId, "1234")
+
+        let numDefault = registry.routeBookInput("2704", preferredSourceId: "bilinovel")
+        XCTAssertEqual(numDefault?.plugin.descriptor.id, "bilinovel")
+        XCTAssertEqual(numDefault?.bookId, "2704")
+
+        registry.setEnabled(false, for: "bilinovel")
+        XCTAssertNil(registry.routeBookInput("https://www.linovelib.com/novel/2704.html"))
+    }
+
+    func testWenku8SiteErrorDetectionAndHTTP404Message() {
+        let notFoundHTML = """
+        <html><head><title>出现错误</title></head><body>
+        <div class="blockcontent"><div>错误原因：对不起，该文章不存在！ 请 返 回 并修正 [关闭本窗口]</div></div>
+        </body></html>
+        """
+        let msg = Wenku8Client.detectSiteErrorMessage(html: notFoundHTML)
+        XCTAssertEqual(msg, "对不起，该文章不存在！")
+
+        let normalLoggedInHTML = """
+        <html><head><title>轻小说</title></head><body>
+        <div class="blockcontent">zzx0826 普通会员 退出登录</div>
+        </body></html>
+        """
+        XCTAssertNil(Wenku8Client.detectSiteErrorMessage(html: normalLoggedInHTML))
+
+        let err404 = SourceError.httpError(404, "https://www.wenku8.cc/book/5689.htm")
+        XCTAssertTrue((err404.errorDescription ?? "").contains("不存在"))
+        XCTAssertFalse((err404.errorDescription ?? "").contains("Cloudflare"))
+    }
+
+    func testBilinovelSecretMapDecoding() {
+        let scrambled = "\u{E000}\u{E002}\u{E005}正文"
+        XCTAssertTrue(BilinovelSecretMap.containsPrivateUseCharacters(scrambled))
+        let decoded = BilinovelSecretMap.decodeParagraph(scrambled)
+        XCTAssertEqual(decoded, "狼政阳正文")
+        XCTAssertFalse(BilinovelSecretMap.containsPrivateUseCharacters(decoded))
+    }
+
+    func testBilinovelPluginParsersAndPagination() throws {
+        XCTAssertEqual(BilinovelPlugin.extractBookId(from: "https://www.linovelib.com/novel/2704.html"), "2704")
+        XCTAssertEqual(BilinovelPlugin.extractBookId(from: "2704"), "2704")
+
+        let bookHTML = """
+        <html>
+          <head>
+            <meta property="og:novel:book_name" content="测试哔哩轻小说" />
+            <meta property="og:novel:author" content="作者君" />
+            <meta property="og:novel:status" content="连载中" />
+            <meta property="og:novel:update_time" content="2026-10-01" />
+            <meta property="og:novel:latest_chapter_name" content="第三章" />
+          </head>
+          <body>
+            <div class="book-img"><img src="/files/article/image/2/2704/2704s.jpg" /></div>
+            <div class="book-label">
+              <a class="label">角川文库</a>
+              <span><a>校园</a><a>奇幻</a></span>
+            </div>
+            <div class="book-dec"><p>第一行简介<br/>第二行简介</p></div>
+            <a href="/novel/2999.html" title="关联作品A">关联作品A</a>
+          </body>
+        </html>
+        """
+        let parsedBook = try BilinovelPlugin.parseBookPage(
+            html: bookHTML,
+            bookId: "2704",
+            baseURL: "https://www.linovelib.com"
+        )
+        XCTAssertEqual(parsedBook.title, "测试哔哩轻小说")
+        XCTAssertEqual(parsedBook.author, "作者君")
+        XCTAssertEqual(parsedBook.publisher, "角川文库")
+        XCTAssertEqual(parsedBook.tags, ["校园", "奇幻"])
+        XCTAssertEqual(parsedBook.coverURL, "https://www.linovelib.com/files/article/image/2/2704/2704s.jpg")
+        XCTAssertEqual(parsedBook.recommendations.count, 1)
+        XCTAssertEqual(parsedBook.recommendations.first?.sourceId, "bilinovel")
+
+        let catalogHTML = """
+        <div class="volume clearfix">
+          <h2 class="v-line">测试哔哩轻小说 第一卷</h2>
+          <ul>
+            <li class="col-4"><a href="/novel/2704/1001.html">插图</a></li>
+            <li class="col-4"><a href="javascript:cid(0)">第一章 被隐藏链接</a></li>
+            <li class="col-4"><a href="/novel/2704/1003.html">第二章 正常链接</a></li>
+          </ul>
+        </div>
+        """
+        let volumes = BilinovelPlugin.parseCatalogPage(
+            html: catalogHTML,
+            bookTitle: "测试哔哩轻小说",
+            baseURL: "https://www.linovelib.com"
+        )
+        XCTAssertEqual(volumes.count, 1)
+        XCTAssertEqual(volumes[0].title, "第一卷")
+        XCTAssertEqual(volumes[0].chapters.count, 3)
+        XCTAssertTrue(volumes[0].chapters[0].isIllustrationChapter)
+        XCTAssertTrue(BilinovelPlugin.isUnresolvedURL(volumes[0].chapters[1].url))
+        XCTAssertEqual(volumes[0].chapters[2].url, "https://www.linovelib.com/novel/2704/1003.html")
+
+        let chapterHTML = """
+        <html><body>
+          <div id="TextContent">
+            <!-- 注释广告 -->
+            <div class="google-auto-placed">广告位</div>
+            <p1>隐藏编号标签噪声</p1>
+            <p>第一段\u{E000}\u{E002}</p>
+            <p><img data-src="/img/cg1.jpg" /></p>
+            <p>最后一段文本</p>
+            ————————————以下为告示，读者请无视——————————————
+            <p>告示内容不应保留</p>
+          </div>
+          <a href="/novel/2704/1003_2.html">下一页</a>
+        </body></html>
+        """
+        let parsedPage = BilinovelPlugin.parseChapterPageHTML(
+            html: chapterHTML,
+            chapterURL: "https://www.linovelib.com/novel/2704/1003.html",
+            baseChapterURL: "https://www.linovelib.com/novel/2704/1003.html",
+            pageIndex: 1,
+            baseURL: "https://www.linovelib.com"
+        )
+        XCTAssertEqual(parsedPage.imageURLs, ["https://www.linovelib.com/img/cg1.jpg"])
+        XCTAssertEqual(parsedPage.nextSubpageURL, "https://www.linovelib.com/novel/2704/1003_2.html")
+        XCTAssertEqual(parsedPage.tokens.count, 3)
+        if parsedPage.tokens.count >= 1, case .paragraph(let p0) = parsedPage.tokens[0] {
+            XCTAssertEqual(p0, "第一段狼政")
+        } else {
+            XCTFail("Expected decoded paragraph token at index 0")
+        }
+
+        let listHTML = """
+        <ol class="book-ol">
+          <li class="book-li">
+            <a href="/novel/2704.html">
+              <img data-original="https://img.example.com/2704.jpg" />
+              <h4 class="book-title">列表书名</h4>
+              <p class="book-desc">列表简介</p>
+              <span class="book-author">作者：作者名</span>
+              <em class="tag">恋爱</em>
+            </a>
+          </li>
+        </ol>
+        """
+        let listRes = BilinovelPlugin.parseBookListPage(html: listHTML, baseURL: "https://www.linovelib.com", currentPage: 1)
+        XCTAssertEqual(listRes.items.count, 1)
+        XCTAssertEqual(listRes.items.first?.sourceId, "bilinovel")
+        XCTAssertEqual(listRes.items.first?.title, "列表书名")
+        XCTAssertEqual(listRes.items.first?.author, "作者名")
+
+        XCTAssertTrue(HTTPRuntime.looksLikeCloudflareChallenge("<html lang=\"zh-cn\"><head><title>请稍候…</title></head></html>"))
+        XCTAssertTrue(HTTPRuntime.looksLikeCloudflareChallenge("<script src=\"/cdn-cgi/challenge-platform/h/b/orchestrate\"></script>"))
+        XCTAssertFalse(HTTPRuntime.looksLikeCloudflareChallenge(bookHTML))
+    }
+
+    func testAggregatedSearchEngineConcurrencyAndNotices() async {
+        struct MockOKSource: BookSourcePlugin {
+            let descriptor = BookSourceDescriptor(
+                id: "mock_ok",
+                displayName: "测试源A",
+                shortBadge: "源A",
+                subtitle: "",
+                defaultMirrors: ["https://a.example.com"],
+                supportedSearchScopes: [.articleName]
+            )
+            func canHandle(rawInput: String) -> String? { nil }
+            func updateConfig(_ config: SourceRuntimeConfig) async {}
+            func setBrowserRuntime(_ runtime: (any SourceBrowserRuntime)?) async {}
+            func search(query: String, scope: SearchScope, page: Int) async throws -> PagedBookResult {
+                PagedBookResult(
+                    items: [AuthorBookItem(id: "1", sourceId: "mock_ok", title: "匹配书1", author: "作者A", category: "", updatedAt: "", wordCount: "", status: "", popularity: "", tags: [], summary: "", coverURL: "")],
+                    currentPage: 1,
+                    totalPages: 2
+                )
+            }
+            func fetchBookDetail(bookIdOrURL: String, onProgress: (@Sendable (String) -> Void)?) async throws -> BookDetail {
+                throw SourceError.invalidInput("unused")
+            }
+            func fetchChapterContent(chapter: ChapterItem, book: BookDetail) async throws -> ChapterContent {
+                throw SourceError.invalidInput("unused")
+            }
+            func downloadImage(url: String, referer: String?) async throws -> DownloadedImageAsset {
+                throw SourceError.invalidInput("unused")
+            }
+            func downloadImages(urls: [String], referer: String?, maxConcurrency: Int, onProgress: (@Sendable (Int, Int) -> Void)?) async throws -> [String: DownloadedImageAsset] {
+                [:]
+            }
+        }
+
+        struct MockChallengeSource: BookSourcePlugin {
+            let descriptor = BookSourceDescriptor(
+                id: "mock_cf",
+                displayName: "验证源B",
+                shortBadge: "源B",
+                subtitle: "",
+                defaultMirrors: ["https://b.example.com"],
+                supportedSearchScopes: [.articleName]
+            )
+            func canHandle(rawInput: String) -> String? { nil }
+            func updateConfig(_ config: SourceRuntimeConfig) async {}
+            func setBrowserRuntime(_ runtime: (any SourceBrowserRuntime)?) async {}
+            func search(query: String, scope: SearchScope, page: Int) async throws -> PagedBookResult {
+                throw SourceError.challengeRequired(sourceId: "mock_cf", url: "https://b.example.com", message: "需要验证")
+            }
+            func fetchBookDetail(bookIdOrURL: String, onProgress: (@Sendable (String) -> Void)?) async throws -> BookDetail {
+                throw SourceError.invalidInput("unused")
+            }
+            func fetchChapterContent(chapter: ChapterItem, book: BookDetail) async throws -> ChapterContent {
+                throw SourceError.invalidInput("unused")
+            }
+            func downloadImage(url: String, referer: String?) async throws -> DownloadedImageAsset {
+                throw SourceError.invalidInput("unused")
+            }
+            func downloadImages(urls: [String], referer: String?, maxConcurrency: Int, onProgress: (@Sendable (Int, Int) -> Void)?) async throws -> [String: DownloadedImageAsset] {
+                [:]
+            }
+        }
+
+        let registry = SourceRegistry(plugins: [MockOKSource(), MockChallengeSource()])
+        let engine = AggregatedSearchEngine(registry: registry)
+        let aggregated = await engine.search(query: "千岁", scope: .articleName, page: 1, sourceId: nil)
+
+        XCTAssertEqual(aggregated.items.count, 1)
+        XCTAssertEqual(aggregated.items.first?.sourceId, "mock_ok")
+        XCTAssertEqual(aggregated.totalPages, 2)
+        XCTAssertEqual(aggregated.notices.count, 1)
+        XCTAssertEqual(aggregated.notices.first?.sourceId, "mock_cf")
+        XCTAssertTrue(aggregated.notices.first?.requiresChallenge ?? false)
+    }
 }

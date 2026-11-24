@@ -2,6 +2,7 @@ import SwiftUI
 import Wenku8Core
 
 struct BookCardItem: Identifiable, Hashable {
+    let sourceId: String
     let id: String
     let title: String
     let author: String
@@ -17,7 +18,10 @@ struct BookCardItem: Identifiable, Hashable {
     let cloudRecordId: String
     let cloudGroupId: String
 
+    var scopedId: String { "\(sourceId):\(id)" }
+
     init(entry: BookmarkEntry, liveDetail: BookDetail? = nil) {
+        self.sourceId = entry.sourceId
         self.id = entry.id
         self.title = entry.title
         self.author = entry.author
@@ -35,6 +39,7 @@ struct BookCardItem: Identifiable, Hashable {
     }
 
     init(authorItem: AuthorBookItem) {
+        self.sourceId = authorItem.sourceId
         self.id = authorItem.id
         self.title = authorItem.title
         self.author = authorItem.author
@@ -53,13 +58,18 @@ struct BookCardItem: Identifiable, Hashable {
 }
 
 struct BookItemCard: View {
-    @EnvironmentObject var vm: StudioViewModel
     @Environment(\.studioAccentColor) private var studioAccent
 
     let item: BookCardItem
+    let sourceBadgeTitle: String
+    var isBookmarked: Bool = false
     var showBookmarkButton: Bool = true
     var showSyncBadge: Bool = false
+    var showSummary: Bool = true
+    var isCompact: Bool = false
     var deleteTooltip: String? = nil
+    var onOpen: () -> Void
+    var onOpenAuthor: ((String) -> Void)? = nil
     var onDelete: (() -> Void)? = nil
     var onToggleBookmark: (() -> Void)? = nil
     var onResumeChapter: (() -> Void)? = nil
@@ -83,13 +93,13 @@ struct BookItemCard: View {
                     HStack(spacing: 6) {
                         if showBookmarkButton, let onToggleBookmark {
                             StudioCircleButton(
-                                systemImage: vm.isBookmarked(item.id) ? "bookmark.fill" : "bookmark",
-                                variant: vm.isBookmarked(item.id) ? .primary : .secondary,
+                                systemImage: isBookmarked ? "bookmark.fill" : "bookmark",
+                                variant: isBookmarked ? .primary : .secondary,
                                 size: .small,
-                                accessibilityLabel: vm.isBookmarked(item.id) ? "移出书架" : "加入书架",
+                                accessibilityLabel: isBookmarked ? "移出书架" : "加入书架",
                                 action: onToggleBookmark
                             )
-                            .help(vm.isBookmarked(item.id) ? "移出书架" : "加入书架")
+                            .help(isBookmarked ? "移出书架" : "加入书架")
                         }
 
                         if cloudGroups.count > 1, !item.cloudRecordId.isEmpty, let onMoveCloudGroup {
@@ -131,10 +141,11 @@ struct BookItemCard: View {
                 HStack(spacing: 6) {
                     if !item.author.isEmpty {
                         Button(item.author) {
-                            vm.loadAuthorWorks(author: item.author)
+                            onOpenAuthor?(item.author)
                         }
                         .buttonStyle(.link)
                         .font(.caption)
+                        .lineLimit(1)
                     }
                     if !item.publisher.isEmpty {
                         pill(item.publisher, color: .blue)
@@ -148,30 +159,32 @@ struct BookItemCard: View {
                     HStack(spacing: 10) {
                         if !item.wordCount.isEmpty {
                             Label(item.wordCount, systemImage: "character.book.closed")
+                                .lineLimit(1)
                         }
                         if !item.lastUpdated.isEmpty {
                             Label("更新 \(item.lastUpdated)", systemImage: "calendar")
+                                .lineLimit(1)
                         }
                     }
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 }
 
-                if !vm.compactBookCards && !item.tags.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 4) {
-                            ForEach(item.tags.prefix(5), id: \.self) { tag in
-                                Text(tag)
-                                    .font(.caption2)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(Color.secondary.opacity(0.12), in: Capsule())
-                            }
+                if !isCompact && !item.tags.isEmpty {
+                    HStack(spacing: 4) {
+                        ForEach(item.tags.prefix(4), id: \.self) { tag in
+                            Text(tag)
+                                .font(.caption2)
+                                .lineLimit(1)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.secondary.opacity(0.12), in: Capsule())
                         }
                     }
+                    .clipped()
                 }
 
-                if vm.showCardSummary && !vm.compactBookCards && !item.summary.isEmpty {
+                if showSummary && !isCompact && !item.summary.isEmpty {
                     Text(item.summary)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -187,82 +200,76 @@ struct BookItemCard: View {
                             .padding(.vertical, 3)
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(Color.accentColor)
-                    .background(Color.accentColor.opacity(0.12), in: Capsule())
+                    .foregroundStyle(studioAccent)
+                    .background(studioAccent.opacity(0.12), in: Capsule())
                 }
 
                 Spacer(minLength: 2)
 
                 HStack(spacing: 8) {
+                    StudioSourceBadge(
+                        title: sourceBadgeTitle,
+                        sourceId: item.sourceId
+                    )
                     Text("#\(item.id)")
                         .font(.caption2.monospaced())
                         .foregroundStyle(.tertiary)
                     if showSyncBadge {
+                        let supportsCloud = item.sourceId == "wenku8"
                         Label(
-                            item.hasSyncedToCloud ? "云端同步" : "仅本地",
-                            systemImage: item.hasSyncedToCloud ? "icloud.fill" : "internaldrive"
+                            supportsCloud ? (item.hasSyncedToCloud ? "云端同步" : "仅本地") : "本地收藏",
+                            systemImage: supportsCloud ? (item.hasSyncedToCloud ? "icloud.fill" : "internaldrive") : "bookmark.circle"
                         )
                         .font(.caption2)
-                        .foregroundStyle(item.hasSyncedToCloud ? Color.accentColor : Color.secondary)
+                        .foregroundStyle(supportsCloud && item.hasSyncedToCloud ? studioAccent : Color.secondary)
                     }
                     Spacer()
                 }
             }
         }
         .padding(12)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+        // Adaptive solid card surface inside LazyVGrid avoids per-card NSVisualEffectView blur overhead on scroll
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: StudioTokens.cardRadius, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 14)
+            RoundedRectangle(cornerRadius: StudioTokens.cardRadius, style: .continuous)
                 .strokeBorder(
-                    isHovered ? studioAccent.opacity(0.48) : StudioTokens.hairlineStroke,
-                    lineWidth: isHovered ? 1.5 : 0.8
+                    isHovered ? studioAccent.opacity(0.55) : StudioTokens.hairlineStroke,
+                    lineWidth: isHovered ? 1.4 : 0.9
                 )
         }
         .shadow(
-            color: isHovered ? studioAccent.opacity(0.12) : StudioTokens.cardShadowColor,
-            radius: isHovered ? 8 : 4,
-            y: isHovered ? 3 : 1.5
+            color: isHovered ? studioAccent.opacity(0.10) : Color.black.opacity(0.04),
+            radius: isHovered ? 6 : 2,
+            y: isHovered ? 2 : 1
         )
-        .scaleEffect(isHovered ? 1.008 : 1.0)
-        .contentShape(RoundedRectangle(cornerRadius: 14))
+        .contentShape(RoundedRectangle(cornerRadius: StudioTokens.cardRadius, style: .continuous))
         .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.14)) {
-                isHovered = hovering
-            }
+            isHovered = hovering
         }
         .onTapGesture {
-            vm.loadBook(inputOverride: item.id)
-        }
-        .onAppear {
-            vm.ensureCoverLoaded(urlString: item.coverURL)
+            onOpen()
         }
     }
 
     private var coverView: some View {
-        Group {
-            if let img = vm.coverImageCache[item.coverURL] {
-                Image(nsImage: img)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-            } else {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.secondary.opacity(0.15))
-                    Image(systemName: "book.closed.fill")
-                        .font(.title2)
-                        .foregroundStyle(.secondary)
-                }
-            }
+        AsyncCoverThumbnail(
+            urlString: item.coverURL,
+            sourceId: item.sourceId,
+            maxPixelSize: 280
+        )
+        .frame(width: 76, height: 108)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.6)
         }
-        .frame(width: 84, height: 120)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .shadow(color: .black.opacity(0.14), radius: 4, y: 2)
     }
 
     private func pill(_ text: String, color: Color) -> some View {
         Text(text)
             .font(.caption2.weight(.medium))
-            .padding(.horizontal, 6)
+            .lineLimit(1)
+            .padding(.horizontal, 7)
             .padding(.vertical, 2)
             .foregroundStyle(color)
             .background(color.opacity(0.14), in: Capsule())
