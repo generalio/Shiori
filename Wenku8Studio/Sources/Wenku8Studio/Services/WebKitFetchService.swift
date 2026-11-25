@@ -3,19 +3,54 @@ import WebKit
 import Wenku8Core
 
 /// Headless WKWebView DOM fetcher sharing `WKWebsiteDataStore.default()` session cookies
-/// with `WebLoginSheet` (so user-authenticated / user-verified sessions apply transparently).
+/// with `WebLoginSheet`, supporting synchronized custom User-Agent, external cookie injection,
+/// and strict navigation timeouts so a stalled page never deadlocks subsequent fetches.
 @MainActor
 final class WebKitFetchService: NSObject, SourceBrowserRuntime, WKNavigationDelegate {
+    private var configuredUserAgent: String = HTTPRuntime.defaultUserAgent
+
     private lazy var webView: WKWebView = {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()
         let wv = WKWebView(frame: NSRect(x: 0, y: 0, width: 1200, height: 800), configuration: config)
-        wv.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        wv.customUserAgent = configuredUserAgent
         wv.navigationDelegate = self
         return wv
     }()
 
     private var pendingContinuation: CheckedContinuation<Void, Error>?
+    private var timeoutTask: Task<Void, Never>?
+
+    func updateUserAgent(_ ua: String) {
+        let trimmed = ua.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolved = trimmed.isEmpty ? HTTPRuntime.defaultUserAgent : trimmed
+        configuredUserAgent = resolved
+        webView.customUserAgent = resolved
+    }
+
+    func syncCookieHeader(_ cookieHeader: String, forURL urlString: String) async {
+        guard let url = URL(string: urlString), let host = url.host else { return }
+        let store = WKWebsiteDataStore.default().httpCookieStore
+        let domain = host.hasPrefix("www.") ? String(host.dropFirst(3)) : host
+        for segment in cookieHeader.split(separator: ";") {
+            let trimmed = segment.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let eq = trimmed.firstIndex(of: "=") else { continue }
+            let name = String(trimmed[..<eq]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = String(trimmed[trimmed.index(after: eq)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { continue }
+            let props: [HTTPCookiePropertyKey: Any] = [
+                .domain: domain,
+                .path: "/",
+                .name: name,
+                .value: value,
+                .secure: url.scheme == "https" ? "TRUE" : "FALSE",
+                .expires: Date().addingTimeInterval(30 * 24 * 3600)
+            ]
+            if let httpCookie = HTTPCookie(properties: props) {
+                await store.setCookie(httpCookie)
+            }
+        }
+    }
 
     func fetchRenderedHTML(
         sourceId: String,
@@ -26,13 +61,26 @@ final class WebKitFetchService: NSObject, SourceBrowserRuntime, WKNavigationDele
             throw SourceError.invalidInput("无效 URL：\(urlString)")
         }
 
-        // Wait cleanly if another load is in progress
-        while pendingContinuation != nil {
+        // Wait cleanly if another load is in progress (bounded wait)
+        var waitTicks = 0
+        while pendingContinuation != nil && waitTicks < 250 {
+            waitTicks += 1
             try await Task.sleep(for: .milliseconds(80))
+        }
+        if pendingContinuation != nil {
+            finishPending(throwing: SourceError.networkError("内置浏览器前序请求超时，已重置"))
+            webView.stopLoading()
         }
 
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
             self.pendingContinuation = cont
+            self.timeoutTask?.cancel()
+            self.timeoutTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(20))
+                guard let self, self.pendingContinuation != nil else { return }
+                self.webView.stopLoading()
+                self.finishPending(throwing: SourceError.networkError("页面加载超时（20s）：\(urlString)"))
+            }
             self.webView.load(URLRequest(url: url))
         }
 
@@ -71,20 +119,29 @@ final class WebKitFetchService: NSObject, SourceBrowserRuntime, WKNavigationDele
         return matching.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
     }
 
+    private func finishPending(throwing error: Error? = nil) {
+        timeoutTask?.cancel()
+        timeoutTask = nil
+        guard let cont = pendingContinuation else { return }
+        pendingContinuation = nil
+        if let error {
+            cont.resume(throwing: error)
+        } else {
+            cont.resume()
+        }
+    }
+
     // MARK: - WKNavigationDelegate
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        pendingContinuation?.resume()
-        pendingContinuation = nil
+        finishPending()
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        pendingContinuation?.resume(throwing: SourceError.networkError(error.localizedDescription))
-        pendingContinuation = nil
+        finishPending(throwing: SourceError.networkError(error.localizedDescription))
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        pendingContinuation?.resume(throwing: SourceError.networkError(error.localizedDescription))
-        pendingContinuation = nil
+        finishPending(throwing: SourceError.networkError(error.localizedDescription))
     }
 }

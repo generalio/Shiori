@@ -260,7 +260,7 @@ public actor Wenku8Client {
         var req = URLRequest(url: url, timeoutInterval: requestTimeout)
         req.httpShouldHandleCookies = false
         req.setValue(
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+            HTTPRuntime.defaultUserAgent,
             forHTTPHeaderField: "User-Agent"
         )
         req.setValue(referer, forHTTPHeaderField: "Referer")

@@ -41,8 +41,8 @@ targets:
         CFBundleName: Shiori
         CFBundleIconFile: AppIcon
         CFBundleIconName: AppIcon
-        CFBundleShortVersionString: "2.6.0"
-        CFBundleVersion: "6"
+        CFBundleShortVersionString: "2.7.0"
+        CFBundleVersion: "7"
         LSMinimumSystemVersion: "$(MACOSX_DEPLOYMENT_TARGET)"
         NSHighResolutionCapable: true
         NSAppTransportSecurity:

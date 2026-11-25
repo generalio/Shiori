@@ -20,7 +20,7 @@ struct Wenku8StudioApp: App {
     @StateObject private var viewModel = StudioViewModel()
 
     var body: some Scene {
-        WindowGroup("Shiori · 轻小说阅读与 EPUB 拼装工坊") {
+        WindowGroup("Shiori · 多书源轻小说与漫画阅读工坊") {
             ContentView()
                 .environmentObject(viewModel)
                 .frame(minWidth: 1020, minHeight: 680)

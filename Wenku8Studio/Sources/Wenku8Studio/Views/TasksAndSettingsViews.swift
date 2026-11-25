@@ -3,6 +3,7 @@ import Wenku8Core
 
 struct TasksAndLogsView: View {
     @EnvironmentObject var vm: StudioViewModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -41,6 +42,7 @@ struct TasksAndLogsView: View {
             }
             ProgressView(value: vm.progressFraction)
                 .progressViewStyle(.linear)
+                .animation(StudioMotion.animation(StudioMotion.standard, reduceMotion: reduceMotion), value: vm.progressFraction)
         }
         .studioCard(cornerRadius: StudioTokens.cardRadius, padding: 14)
     }
@@ -48,8 +50,10 @@ struct TasksAndLogsView: View {
     private var outputsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("已生成 EPUB（\(vm.outputs.count)）")
+                Text("已生成产物（\(vm.outputs.count)）")
                     .font(.headline)
+                    .contentTransition(.numericText())
+                    .animation(StudioMotion.animation(StudioMotion.micro, reduceMotion: reduceMotion), value: vm.outputs.count)
                 Spacer()
                 if !vm.outputs.isEmpty {
                     StudioPillButton(title: "清空记录", systemImage: "trash", size: .small) {

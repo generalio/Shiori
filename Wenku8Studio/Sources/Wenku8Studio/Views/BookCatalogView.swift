@@ -12,7 +12,7 @@ struct BookCatalogView: View {
                     VStack(spacing: 14) {
                         ProgressView()
                             .controlSize(.large)
-                        Text("正在从 \(vm.baseURL) 拉取书籍信息与目录...")
+                        Text("正在拉取作品详情与章节目录...")
                             .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -257,51 +257,82 @@ struct BookCatalogView: View {
     }
 
     private func catalogControlsBar(_ book: BookDetail) -> some View {
+        let isManga = book.contentKind == .manga
         let quickActionButtons = HStack(spacing: 8) {
             StudioPillButton(
-                title: vm.areAllChaptersSelected ? "已全选整本" : "全选整本",
+                title: vm.areAllChaptersSelected ? "已全选" : (isManga ? "全选全组" : "全选整本"),
                 systemImage: vm.areAllChaptersSelected ? "checkmark.circle.fill" : "checklist.checked",
                 variant: vm.areAllChaptersSelected ? .primary : .secondary,
                 size: .small
             ) {
                 vm.selectAllChapters()
             }
-            StudioPillButton(title: "仅首卷", size: .small) { vm.selectFirstVolumeOnly() }
+            StudioPillButton(title: isManga ? "仅主连载组" : "仅首卷", size: .small) { vm.selectFirstVolumeOnly() }
             StudioPillButton(title: "清空", size: .small) { vm.clearSelection() }
             StudioPillButton(title: "反选", size: .small) { vm.invertSelection() }
-            StudioPillButton(title: "仅含插图卷", size: .small) { vm.selectIllustratedVolumesOnly() }
+            if isManga {
+                StudioPillButton(
+                    title: vm.mangaCatalogReversed ? "倒序（最新在前）" : "正序（第1话在前）",
+                    systemImage: "arrow.up.arrow.down",
+                    size: .small
+                ) {
+                    vm.mangaCatalogReversed.toggle()
+                }
+            } else {
+                StudioPillButton(title: "仅含插图卷", size: .small) { vm.selectIllustratedVolumesOnly() }
+            }
         }
         .fixedSize(horizontal: true, vertical: false)
 
         let filterInputs = HStack(spacing: 10) {
             StudioSearchField(
                 icon: "magnifyingglass",
-                placeholder: "按章节名过滤...",
+                placeholder: isManga ? "按话数名称过滤..." : "按章节名过滤...",
                 text: $vm.chapterSearchQuery
             )
             .frame(minWidth: 150, maxWidth: 230)
 
             StudioSearchField(
                 icon: "number",
-                placeholder: "按卷号勾选（1-3）",
+                placeholder: isManga ? "按分组号勾选（1-2）" : "按卷号勾选（1-3）",
                 text: $vm.volumeRangeInput,
                 onSubmit: { vm.applyVolumeRangeSelection() }
             )
             .frame(minWidth: 160, maxWidth: 230)
 
-            StudioPillButton(title: "应用卷号", size: .small) {
+            StudioPillButton(title: isManga ? "应用分组" : "应用卷号", size: .small) {
                 vm.applyVolumeRangeSelection()
             }
             .fixedSize()
         }
 
-        let exportModeTabs = StudioSegmentedTabs(selection: $vm.assemblyConfig.exportMode, items: ExportMode.allCases)
-            .frame(width: 280)
+        let exportModeTabs = Group {
+            if isManga {
+                HStack(spacing: 8) {
+                    StudioSegmentedTabs(selection: $vm.mangaExportFormat, items: MangaExportFormat.allCases)
+                        .frame(width: 210)
+                    StudioFilterChip(
+                        title: vm.mangaMergeSelectedChapters ? "合并为单本" : "每话独立文件",
+                        systemImage: vm.mangaMergeSelectedChapters ? "doc.on.doc.fill" : "square.stack.fill",
+                        isSelected: vm.mangaMergeSelectedChapters
+                    ) {
+                        vm.mangaMergeSelectedChapters.toggle()
+                    }
+                }
+            } else {
+                StudioSegmentedTabs(selection: $vm.assemblyConfig.exportMode, items: ExportMode.allCases)
+                    .frame(width: 280)
+            }
+        }
+
+        let headerTitle = isManga
+            ? "漫画分组与话数目录（共 \(book.volumes.count) 组）"
+            : "分卷与章节目录（共 \(book.volumes.count) 卷）"
 
         return VStack(alignment: .leading, spacing: 10) {
             ViewThatFits(in: .horizontal) {
                 HStack {
-                    Text("分卷与章节目录（共 \(book.volumes.count) 卷）")
+                    Text(headerTitle)
                         .font(.headline)
                         .fixedSize()
                     Spacer(minLength: 12)
@@ -309,7 +340,7 @@ struct BookCatalogView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("分卷与章节目录（共 \(book.volumes.count) 卷）")
+                    Text(headerTitle)
                         .font(.headline)
                     ScrollView(.horizontal, showsIndicators: false) {
                         quickActionButtons
@@ -337,13 +368,15 @@ struct BookCatalogView: View {
     }
 
     private func volumesList(_ book: BookDetail) -> some View {
-        LazyVStack(spacing: 10) {
+        let isManga = book.contentKind == .manga
+        return LazyVStack(spacing: 10) {
             ForEach(book.volumes) { vol in
-                let filteredChaps = filteredChapters(for: vol)
-                if !filteredChaps.isEmpty || vm.chapterSearchQuery.isEmpty {
+                let rawFiltered = filteredChapters(for: vol)
+                let orderedChaps = (isManga && vm.mangaCatalogReversed) ? Array(rawFiltered.reversed()) : rawFiltered
+                if !orderedChaps.isEmpty || vm.chapterSearchQuery.isEmpty {
                     VolumeSectionCard(
                         volume: vol,
-                        chapters: filteredChaps,
+                        chapters: orderedChaps,
                         selectionState: vm.volumeSelectionState(vol),
                         isExpanded: Binding(
                             get: { vm.expandedVolumeIds.contains(vol.id) || !vm.chapterSearchQuery.isEmpty },
@@ -369,15 +402,26 @@ struct BookCatalogView: View {
     }
 
     private func bottomActionBar(_ book: BookDetail) -> some View {
-        HStack(spacing: 14) {
+        let isManga = book.contentKind == .manga
+        return HStack(spacing: 14) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("已选 \(vm.selectedVolumesCount) 卷 · \(vm.selectedBodyChaptersCount) 个正文章节")
-                    .font(.callout.weight(.medium))
-                    .contentTransition(.numericText())
-                Text("输出至：\(vm.outputDirectoryPath)（\(vm.assemblyConfig.exportMode.rawValue)）")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                if isManga {
+                    Text("已选 \(vm.selectedVolumesCount) 组 · \(vm.selectedBodyChaptersCount) 话")
+                        .font(.callout.weight(.medium))
+                        .contentTransition(.numericText())
+                    Text("输出至：\(vm.outputDirectoryPath)（\(vm.mangaExportFormat.rawValue) · \(vm.mangaMergeSelectedChapters ? "合并单本" : "每话独立")）")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                } else {
+                    Text("已选 \(vm.selectedVolumesCount) 卷 · \(vm.selectedBodyChaptersCount) 个正文章节")
+                        .font(.callout.weight(.medium))
+                        .contentTransition(.numericText())
+                    Text("输出至：\(vm.outputDirectoryPath)（\(vm.assemblyConfig.exportMode.rawValue)）")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
 
             Spacer()
@@ -390,17 +434,17 @@ struct BookCatalogView: View {
                 }
             } else {
                 StudioPillButton(
-                    title: "整本一键转 EPUB",
+                    title: isManga ? "整本导出 \(vm.mangaExportFormat.fileExtension.uppercased())" : "整本一键转 EPUB",
                     systemImage: "books.vertical.fill",
                     size: .large,
                     isDisabled: book.volumes.isEmpty
                 ) {
                     vm.downloadFullBookAsSingleEPUB()
                 }
-                .help("自动全选所有分卷与章节，并合并导出为单个完整 EPUB")
+                .help(isManga ? "自动全选并合并导出为单个完整漫画包" : "自动全选所有分卷与章节，并合并导出为单个完整 EPUB")
 
                 StudioPillButton(
-                    title: "下载选中 EPUB",
+                    title: isManga ? "下载选中 \(vm.mangaExportFormat.fileExtension.uppercased())" : "下载选中 EPUB",
                     systemImage: "arrow.down.doc.fill",
                     variant: .primary,
                     size: .large,
@@ -415,6 +459,7 @@ struct BookCatalogView: View {
 }
 
 private struct VolumeSectionCard: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let volume: VolumeItem
     let chapters: [ChapterItem]
     let selectionState: Int
@@ -431,11 +476,12 @@ private struct VolumeSectionCard: View {
                     Image(systemName: selectionIcon)
                         .font(.title3)
                         .foregroundStyle(selectionState == 0 ? Color.secondary : Color.accentColor)
+                        .contentTransition(.symbolEffect(.replace))
                 }
                 .buttonStyle(.plain)
 
                 Button {
-                    withAnimation(.easeInOut(duration: 0.16)) {
+                    withAnimation(StudioMotion.animation(StudioMotion.standard, reduceMotion: reduceMotion)) {
                         isExpanded.toggle()
                     }
                 } label: {
@@ -454,9 +500,10 @@ private struct VolumeSectionCard: View {
                         Text("\(volume.chapters.count) 章")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        Image(systemName: "chevron.down")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .rotationEffect(.degrees(isExpanded ? 180 : 0))
                     }
                     .contentShape(Rectangle())
                 }
@@ -467,7 +514,7 @@ private struct VolumeSectionCard: View {
 
             if isExpanded {
                 Divider()
-                VStack(spacing: 0) {
+                LazyVStack(spacing: 0) {
                     ForEach(chapters) { chap in
                         HStack(spacing: 10) {
                             Button {
@@ -475,6 +522,7 @@ private struct VolumeSectionCard: View {
                             } label: {
                                 Image(systemName: selectedChapterIds.contains(chap.id) ? "checkmark.square.fill" : "square")
                                     .foregroundStyle(selectedChapterIds.contains(chap.id) ? Color.accentColor : Color.secondary)
+                                    .contentTransition(.symbolEffect(.replace))
                             }
                             .buttonStyle(.plain)
 
@@ -507,6 +555,7 @@ private struct VolumeSectionCard: View {
                     }
                 }
                 .padding(.vertical, 4)
+                .transition(.opacity)
             }
         }
         .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
@@ -547,6 +596,11 @@ private struct RecommendationBookChip: View {
                             ? studioAccent.opacity(0.11)
                             : Color(nsColor: .controlBackgroundColor)
                     )
+                    .shadow(
+                        color: isHovered ? studioAccent.opacity(0.14) : StudioTokens.cardShadowColor,
+                        radius: 3,
+                        y: 1.5
+                    )
             }
             .overlay {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -555,12 +609,6 @@ private struct RecommendationBookChip: View {
                         lineWidth: isHovered ? 1.1 : 0.8
                     )
             }
-            .shadow(
-                color: isHovered ? studioAccent.opacity(0.14) : StudioTokens.cardShadowColor,
-                radius: isHovered ? 5 : 2,
-                y: isHovered ? 2 : 1
-            )
-            .scaleEffect(isHovered ? 1.02 : 1.0)
             .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(StudioPressScaleStyle(pressedScale: 0.96))

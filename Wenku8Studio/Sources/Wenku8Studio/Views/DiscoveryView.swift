@@ -57,13 +57,13 @@ struct DiscoveryView: View {
     }
 
     private var discoveryHeader: some View {
-        let enabledPlugins = vm.sourceRegistry.enabledPlugins()
+        let enabledPlugins = vm.sourceRegistry.enabledPlugins(matching: vm.selectedContentKindFilter)
         let channels = vm.activeDiscoveryChannels()
         return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
                 StudioSearchField(
                     icon: "magnifyingglass",
-                    placeholder: "搜索轻小说书名、作者名、书号或链接...",
+                    placeholder: "搜索轻小说/漫画书名、作者、编号或链接...",
                     text: $vm.searchQuery,
                     onSubmit: { vm.performDiscoverySearch() }
                 )
@@ -82,11 +82,39 @@ struct DiscoveryView: View {
                 }
             }
 
-            if enabledPlugins.count > 1 {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    StudioFilterChip(
+                        title: "全部媒介",
+                        systemImage: "square.grid.2x2.fill",
+                        isSelected: vm.selectedContentKindFilter == nil
+                    ) {
+                        vm.setDiscoveryContentKindFilter(nil)
+                    }
+                    StudioFilterChip(
+                        title: "轻小说",
+                        systemImage: "book.fill",
+                        isSelected: vm.selectedContentKindFilter == .lightNovel
+                    ) {
+                        vm.setDiscoveryContentKindFilter(.lightNovel)
+                    }
+                    StudioFilterChip(
+                        title: "漫画",
+                        systemImage: "photo.stack.fill",
+                        isSelected: vm.selectedContentKindFilter == .manga
+                    ) {
+                        vm.setDiscoveryContentKindFilter(.manga)
+                        if let copy = vm.sourceRegistry.plugin(for: "copymanga") as? any DiscoveryCapableSource,
+                           let first = copy.discoveryChannels().first {
+                            vm.loadDiscoveryList(title: first.title, path: first.path, sourceId: "copymanga")
+                        }
+                    }
+
+                    if enabledPlugins.count > 1 {
+                        Divider().frame(height: 18)
+
                         StudioFilterChip(
-                            title: "全部渠道",
+                            title: "全部书源",
                             systemImage: "square.stack.3d.up.fill",
                             isSelected: vm.selectedDiscoverySourceFilter == nil
                         ) {
@@ -95,9 +123,12 @@ struct DiscoveryView: View {
 
                         ForEach(enabledPlugins, id: \.descriptor.id) { plugin in
                             let sid = plugin.descriptor.id
+                            let iconName = sid == "bilinovel"
+                                ? "sparkles.rectangle.stack"
+                                : (sid == "copymanga" ? "photo.stack" : "books.vertical")
                             StudioFilterChip(
                                 title: plugin.descriptor.displayName,
-                                systemImage: sid == "bilinovel" ? "sparkles.rectangle.stack" : "books.vertical",
+                                systemImage: iconName,
                                 isSelected: vm.selectedDiscoverySourceFilter == sid
                             ) {
                                 vm.setDiscoverySourceFilter(sid)

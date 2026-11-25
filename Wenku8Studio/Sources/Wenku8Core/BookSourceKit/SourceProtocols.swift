@@ -74,11 +74,77 @@ public struct DiscoveryChannel: Identifiable, Hashable, Sendable {
     }
 }
 
+public enum SourceTransportEngine: String, Codable, Hashable, Sendable, CaseIterable {
+    case native
+    case curlCFFI
+
+    public var displayTitle: String {
+        switch self {
+        case .native: return "原生网络 (URLSession)"
+        case .curlCFFI: return "本地 Python curl_cffi 桥接"
+        }
+    }
+}
+
+public struct SourceAuthState: Codable, Hashable, Sendable {
+    public var sourceId: String
+    public var cookie: String
+    public var userAgent: String
+    public var authorizationToken: String
+    public var accountLabel: String
+    public var isVerified: Bool
+    public var lastVerifiedAt: Date?
+    public var supportsSilentRefresh: Bool
+    public var lastErrorMessage: String?
+
+    public init(
+        sourceId: String,
+        cookie: String = "",
+        userAgent: String = HTTPRuntime.defaultUserAgent,
+        authorizationToken: String = "",
+        accountLabel: String = "",
+        isVerified: Bool = false,
+        lastVerifiedAt: Date? = nil,
+        supportsSilentRefresh: Bool = false,
+        lastErrorMessage: String? = nil
+    ) {
+        self.sourceId = sourceId
+        self.cookie = cookie
+        self.userAgent = userAgent
+        self.authorizationToken = authorizationToken
+        self.accountLabel = accountLabel
+        self.isVerified = isVerified
+        self.lastVerifiedAt = lastVerifiedAt
+        self.supportsSilentRefresh = supportsSilentRefresh
+        self.lastErrorMessage = lastErrorMessage
+    }
+
+    public var hasCredentials: Bool {
+        !cookie.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+        !authorizationToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}
+
+public enum SecureStateFileWriter {
+    public static func write(_ data: Data, to url: URL) throws {
+        let dir = url.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try data.write(to: url, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+}
+
 public struct SourceRuntimeConfig: Codable, Hashable, Sendable {
     public var sourceId: String
     public var isEnabled: Bool
     public var baseURL: String
     public var cookie: String
+    public var userAgent: String
+    public var authorizationToken: String
+    public var transportEngine: SourceTransportEngine
+    public var pythonExecutablePath: String
+    public var cdnRegion: String
+    public var preferHighQualityImages: Bool
     public var requestTimeout: TimeInterval
     public var politeDelaySeconds: Double
     public var autoRefreshCookie: Bool
@@ -90,6 +156,12 @@ public struct SourceRuntimeConfig: Codable, Hashable, Sendable {
         isEnabled: Bool = true,
         baseURL: String,
         cookie: String = "",
+        userAgent: String = HTTPRuntime.defaultUserAgent,
+        authorizationToken: String = "",
+        transportEngine: SourceTransportEngine = .native,
+        pythonExecutablePath: String = "",
+        cdnRegion: String = "1",
+        preferHighQualityImages: Bool = true,
         requestTimeout: TimeInterval = 15,
         politeDelaySeconds: Double = 0.25,
         autoRefreshCookie: Bool = true,
@@ -100,11 +172,42 @@ public struct SourceRuntimeConfig: Codable, Hashable, Sendable {
         self.isEnabled = isEnabled
         self.baseURL = baseURL
         self.cookie = cookie
+        self.userAgent = userAgent
+        self.authorizationToken = authorizationToken
+        self.transportEngine = transportEngine
+        self.pythonExecutablePath = pythonExecutablePath
+        self.cdnRegion = cdnRegion
+        self.preferHighQualityImages = preferHighQualityImages
         self.requestTimeout = requestTimeout
         self.politeDelaySeconds = politeDelaySeconds
         self.autoRefreshCookie = autoRefreshCookie
         self.refreshIntervalMinutes = refreshIntervalMinutes
         self.lastCookieRefreshAt = lastCookieRefreshAt
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case sourceId, isEnabled, baseURL, cookie, userAgent, authorizationToken
+        case transportEngine, pythonExecutablePath, cdnRegion, preferHighQualityImages
+        case requestTimeout, politeDelaySeconds, autoRefreshCookie, refreshIntervalMinutes, lastCookieRefreshAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        sourceId = try c.decode(String.self, forKey: .sourceId)
+        isEnabled = try c.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+        baseURL = try c.decode(String.self, forKey: .baseURL)
+        cookie = try c.decodeIfPresent(String.self, forKey: .cookie) ?? ""
+        userAgent = try c.decodeIfPresent(String.self, forKey: .userAgent) ?? HTTPRuntime.defaultUserAgent
+        authorizationToken = try c.decodeIfPresent(String.self, forKey: .authorizationToken) ?? ""
+        transportEngine = try c.decodeIfPresent(SourceTransportEngine.self, forKey: .transportEngine) ?? .native
+        pythonExecutablePath = try c.decodeIfPresent(String.self, forKey: .pythonExecutablePath) ?? ""
+        cdnRegion = try c.decodeIfPresent(String.self, forKey: .cdnRegion) ?? "1"
+        preferHighQualityImages = try c.decodeIfPresent(Bool.self, forKey: .preferHighQualityImages) ?? true
+        requestTimeout = try c.decodeIfPresent(TimeInterval.self, forKey: .requestTimeout) ?? 15
+        politeDelaySeconds = try c.decodeIfPresent(Double.self, forKey: .politeDelaySeconds) ?? 0.25
+        autoRefreshCookie = try c.decodeIfPresent(Bool.self, forKey: .autoRefreshCookie) ?? (sourceId == "wenku8")
+        refreshIntervalMinutes = try c.decodeIfPresent(Int.self, forKey: .refreshIntervalMinutes) ?? 15
+        lastCookieRefreshAt = try c.decodeIfPresent(Date.self, forKey: .lastCookieRefreshAt)
     }
 }
 
@@ -135,6 +238,8 @@ public enum SourceError: LocalizedError, Sendable {
     case notFound(String)
     case challengeRequired(sourceId: String, url: String, message: String)
     case loginRequired(sourceId: String, message: String)
+    case rateLimited(sourceId: String, message: String)
+    case mirrorUnavailable(sourceId: String, message: String)
     case httpError(Int, String)
     case parseError(String)
     case networkError(String)
@@ -149,6 +254,10 @@ public enum SourceError: LocalizedError, Sendable {
         case .challengeRequired(_, let url, let msg):
             return "\(msg)：\(url)"
         case .loginRequired(_, let msg):
+            return msg
+        case .rateLimited(_, let msg):
+            return msg
+        case .mirrorUnavailable(_, let msg):
             return msg
         case .httpError(let code, let url):
             switch code {

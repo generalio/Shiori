@@ -59,6 +59,7 @@ struct BookCardItem: Identifiable, Hashable {
 
 struct BookItemCard: View {
     @Environment(\.studioAccentColor) private var studioAccent
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let item: BookCardItem
     let sourceBadgeTitle: String
@@ -96,6 +97,7 @@ struct BookItemCard: View {
                                 systemImage: isBookmarked ? "bookmark.fill" : "bookmark",
                                 variant: isBookmarked ? .primary : .secondary,
                                 size: .small,
+                                bounceTrigger: isBookmarked,
                                 accessibilityLabel: isBookmarked ? "移出书架" : "加入书架",
                                 action: onToggleBookmark
                             )
@@ -228,8 +230,16 @@ struct BookItemCard: View {
             }
         }
         .padding(12)
-        // Adaptive solid card surface inside LazyVGrid avoids per-card NSVisualEffectView blur overhead on scroll
-        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: StudioTokens.cardRadius, style: .continuous))
+        // Hardware shadowPath on background RoundedRectangle avoids offscreen alpha-mask re-rasterization of text & cover on hover/scroll
+        .background {
+            RoundedRectangle(cornerRadius: StudioTokens.cardRadius, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor))
+                .shadow(
+                    color: isHovered ? studioAccent.opacity(0.14) : Color.black.opacity(0.045),
+                    radius: 4,
+                    y: 1.5
+                )
+        }
         .overlay {
             RoundedRectangle(cornerRadius: StudioTokens.cardRadius, style: .continuous)
                 .strokeBorder(
@@ -237,14 +247,11 @@ struct BookItemCard: View {
                     lineWidth: isHovered ? 1.4 : 0.9
                 )
         }
-        .shadow(
-            color: isHovered ? studioAccent.opacity(0.10) : Color.black.opacity(0.04),
-            radius: isHovered ? 6 : 2,
-            y: isHovered ? 2 : 1
-        )
         .contentShape(RoundedRectangle(cornerRadius: StudioTokens.cardRadius, style: .continuous))
         .onHover { hovering in
-            isHovered = hovering
+            withAnimation(StudioMotion.animation(StudioMotion.micro, reduceMotion: reduceMotion)) {
+                isHovered = hovering
+            }
         }
         .onTapGesture {
             onOpen()

@@ -5,6 +5,7 @@ import Wenku8Core
 struct SettingsAndAssemblyView: View {
     @EnvironmentObject var vm: StudioViewModel
     @Environment(\.studioAccentColor) private var studioAccent
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var searchText: String = ""
     private let builder = EPUBBuilder()
 
@@ -1001,13 +1002,15 @@ struct SettingsAndAssemblyView: View {
             VStack(alignment: .leading, spacing: 18) {
                 SettingsCardGroup(title: "插件信息与状态") {
                     HStack(spacing: 14) {
+                        let sourceTint: Color = sourceId == "bilinovel" ? .pink : (sourceId == "copymanga" ? .teal : studioAccent)
+                        let sourceIcon: String = sourceId == "bilinovel" ? "sparkles.rectangle.stack.fill" : (sourceId == "copymanga" ? "photo.stack.fill" : "books.vertical.fill")
                         ZStack {
                             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill((sourceId == "bilinovel" ? Color.pink : studioAccent).opacity(0.14))
+                                .fill(sourceTint.opacity(0.14))
                                 .frame(width: 48, height: 48)
-                            Image(systemName: sourceId == "bilinovel" ? "sparkles.rectangle.stack.fill" : "books.vertical.fill")
+                            Image(systemName: sourceIcon)
                                 .font(.system(size: 20, weight: .semibold))
-                                .foregroundStyle(sourceId == "bilinovel" ? Color.pink : studioAccent)
+                                .foregroundStyle(sourceTint)
                         }
 
                         VStack(alignment: .leading, spacing: 4) {
@@ -1038,22 +1041,26 @@ struct SettingsAndAssemblyView: View {
                 SettingsCardGroup(title: "镜像地址与请求限速") {
                     SettingsRow(title: "主站与镜像域名", subtitle: "可在官方域名间快速切换或填写自定义镜像地址") {
                         VStack(alignment: .trailing, spacing: 8) {
-                            HStack(spacing: 6) {
-                                ForEach(desc.defaultMirrors, id: \.self) { mirror in
-                                    let host = mirror.replacingOccurrences(of: "https://", with: "")
-                                    StudioFilterChip(
-                                        title: host,
-                                        isSelected: cfgBinding.wrappedValue.baseURL.lowercased() == mirror.lowercased()
-                                    ) {
-                                        var updated = cfgBinding.wrappedValue
-                                        updated.baseURL = mirror
-                                        cfgBinding.wrappedValue = updated
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 6) {
+                                    ForEach(desc.defaultMirrors, id: \.self) { mirror in
+                                        let host = mirror.replacingOccurrences(of: "https://", with: "")
+                                        StudioFilterChip(
+                                            title: host,
+                                            isSelected: cfgBinding.wrappedValue.baseURL.lowercased() == mirror.lowercased()
+                                        ) {
+                                            var updated = cfgBinding.wrappedValue
+                                            updated.baseURL = mirror
+                                            cfgBinding.wrappedValue = updated
+                                        }
+                                        .fixedSize()
                                     }
                                 }
                             }
+                            .frame(maxWidth: 420)
                             TextField("https://...", text: cfgBinding.baseURL)
                                 .textFieldStyle(.roundedBorder)
-                                .frame(width: 280)
+                                .frame(width: 300)
                         }
                     }
 
@@ -1071,22 +1078,34 @@ struct SettingsAndAssemblyView: View {
                     }
                 }
 
-                SettingsCardGroup(title: "会话验证与 Cookie") {
+                SettingsCardGroup(title: "会话验证、外部浏览器导入与传输引擎") {
                     SettingsRow(
-                        title: "内置网页登录 / 人机验证",
+                        title: "浏览器认证与 cURL / Token 导入",
                         subtitle: sourceId == "bilinovel"
-                            ? "若遇到 Cloudflare 人机验证或章节限制，点击左侧按钮在可视浏览器完成验证后自动同步会话"
-                            : "通过内置浏览器登录以解锁全站搜索、云端书架与高阶功能"
+                            ? "内置浏览器被 Cloudflare 拦截时，可在系统 Safari/Chrome 手动验证后一键粘贴 Copy as cURL 自动提取 Cookie 与 User-Agent"
+                            : (sourceId == "copymanga"
+                                ? "公开搜漫与看漫无需登录；如需同步个人云端书架，可导入浏览器 Authorization Token"
+                                : "通过内置或系统浏览器登录并同步凭证")
                     ) {
                         HStack(spacing: 8) {
                             StudioPillButton(
-                                title: sourceId == "bilinovel" ? "网页验证 / 登录" : "网页登录",
-                                systemImage: "safari",
+                                title: sourceId == "copymanga" ? "导入 Token" : "登录 / 导入",
+                                systemImage: "key.fill",
                                 variant: .primary,
                                 size: .small
                             ) {
                                 vm.openWebLogin(for: sourceId)
                             }
+                            .fixedSize()
+
+                            StudioPillButton(
+                                title: "浏览器打开",
+                                systemImage: "safari",
+                                size: .small
+                            ) {
+                                vm.openExternalBrowserForLogin(sourceId: sourceId)
+                            }
+                            .fixedSize()
 
                             StudioPillButton(
                                 title: "检测连接",
@@ -1095,8 +1114,9 @@ struct SettingsAndAssemblyView: View {
                             ) {
                                 vm.testSourceSession(sourceId: sourceId)
                             }
+                            .fixedSize()
 
-                            if !cfgBinding.wrappedValue.cookie.isEmpty {
+                            if !cfgBinding.wrappedValue.cookie.isEmpty || !cfgBinding.wrappedValue.authorizationToken.isEmpty {
                                 StudioPillButton(
                                     title: "清空",
                                     systemImage: "trash",
@@ -1106,6 +1126,69 @@ struct SettingsAndAssemblyView: View {
                                     vm.clearSavedCookie(for: sourceId)
                                 }
                             }
+                        }
+                    }
+
+                    if sourceId == "bilinovel" {
+                        Divider()
+
+                        SettingsRow(
+                            title: "网络传输引擎",
+                            subtitle: "若导入 cf_clearance 后原生网络仍 403，可切换本地 Python curl_cffi 桥接以对齐真实浏览器 TLS 指纹"
+                        ) {
+                            HStack(spacing: 8) {
+                                StudioSegmentedTabs(
+                                    selection: cfgBinding.transportEngine,
+                                    items: SourceTransportEngine.allCases,
+                                    title: { $0 == .native ? "原生网络" : "Python curl_cffi" }
+                                )
+                                StudioPillButton(title: "检测环境", systemImage: "terminal", size: .small) {
+                                    vm.detectCurlCFFIEnvironment(for: sourceId)
+                                }
+                            }
+                        }
+
+                        if cfgBinding.wrappedValue.transportEngine == .curlCFFI {
+                            Divider()
+                            SettingsRow(title: "自定义 Python 路径（可选）", subtitle: "留空则自动探测项目 .venv 及系统 Homebrew Python3") {
+                                TextField("/opt/homebrew/bin/python3", text: cfgBinding.pythonExecutablePath)
+                                    .textFieldStyle(.roundedBorder)
+                                    .frame(width: 260)
+                            }
+                        }
+
+                        if let env = vm.curlCFFIStatus {
+                            Divider()
+                            HStack(spacing: 8) {
+                                Image(systemName: env.isAvailable ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                    .foregroundStyle(env.isAvailable ? .green : .orange)
+                                Text(env.message)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                        }
+                    }
+
+                    if desc.contentKind == .manga {
+                        Divider()
+
+                        SettingsRow(title: "图片 CDN 线路", subtitle: "根据当前网络环境切换海外或大陆加速线路") {
+                            StudioSegmentedTabs(
+                                selection: cfgBinding.cdnRegion,
+                                items: ["1", "0"],
+                                title: { $0 == "1" ? "海外线路 (1)" : "大陆线路 (0)" }
+                            )
+                        }
+
+                        Divider()
+
+                        SettingsRow(title: "优先高清画质（c1500x）", subtitle: "关闭时使用标准清晰度（c800x）以节省流量") {
+                            Toggle("", isOn: cfgBinding.preferHighQualityImages)
+                                .labelsHidden()
+                                .toggleStyle(.switch)
                         }
                     }
 
@@ -1126,19 +1209,35 @@ struct SettingsAndAssemblyView: View {
 
                     if vm.showAdvancedSettings {
                         Divider()
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("手动 Cookie（仅限当前书源）")
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("User-Agent（导入 cURL 时会自动对齐浏览器 UA）")
                                 .font(.caption.weight(.medium))
                                 .foregroundStyle(.secondary)
-                            TextEditor(text: cfgBinding.cookie)
+                            TextField(HTTPRuntime.defaultUserAgent, text: cfgBinding.userAgent)
+                                .textFieldStyle(.roundedBorder)
                                 .font(.caption.monospaced())
-                                .frame(height: 62)
-                                .padding(6)
-                                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
-                                .overlay {
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .strokeBorder(StudioTokens.hairlineStroke, lineWidth: 0.8)
-                                }
+
+                            if desc.contentKind == .manga {
+                                Text("Authorization Token（拷贝漫画个人收藏同步）")
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(.secondary)
+                                TextField("不含 Token 前缀的纯令牌或直接粘贴 Token ...", text: cfgBinding.authorizationToken)
+                                    .textFieldStyle(.roundedBorder)
+                                    .font(.caption.monospaced())
+                            } else {
+                                Text("手动 Cookie（仅限当前书源）")
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(.secondary)
+                                TextEditor(text: cfgBinding.cookie)
+                                    .font(.caption.monospaced())
+                                    .frame(height: 62)
+                                    .padding(6)
+                                    .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+                                    .overlay {
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .strokeBorder(StudioTokens.hairlineStroke, lineWidth: 0.8)
+                                    }
+                            }
                         }
                         .padding(16)
                     }

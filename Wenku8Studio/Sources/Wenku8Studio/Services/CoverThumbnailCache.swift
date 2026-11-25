@@ -18,8 +18,23 @@ final class CoverThumbnailCache {
     }()
 
     private var inflightTasks: [String: Task<NSImage?, Never>] = [:]
+    private var configuredRegistry: SourceRegistry?
+    private var refererProvider: ((String) -> String)?
 
     private init() {}
+
+    func configure(registry: SourceRegistry, refererProvider: @escaping (String) -> String) {
+        self.configuredRegistry = registry
+        self.refererProvider = refererProvider
+    }
+
+    func resolveRegistry() -> SourceRegistry? {
+        configuredRegistry
+    }
+
+    func resolveReferer(for sourceId: String) -> String {
+        refererProvider?(sourceId) ?? ""
+    }
 
     func cachedImage(urlString: String, sourceId: String) -> NSImage? {
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -50,6 +65,9 @@ final class CoverThumbnailCache {
             if !sourceId.isEmpty { return sourceId }
             if trimmed.contains("linovelib") || trimmed.contains("readpai") || trimmed.contains("bilinovel") {
                 return "bilinovel"
+            }
+            if trimmed.contains("mangafun") || trimmed.contains("mangacopy") || trimmed.contains("copymanga") || trimmed.contains("hotmangasd") {
+                return "copymanga"
             }
             return "wenku8"
         }()
@@ -104,47 +122,60 @@ final class CoverThumbnailCache {
     }
 }
 
-struct AsyncCoverThumbnail: View {
-    @EnvironmentObject var vm: StudioViewModel
+/// Completely decoupled from `StudioViewModel` (`@EnvironmentObject` removed) so global VM
+/// updates never invalidate 20–40 visible cover thumbnails during typing, hovering, or animations.
+struct AsyncCoverThumbnail: View, Equatable {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let urlString: String
     let sourceId: String
     var maxPixelSize: CGFloat = 320
 
     @State private var image: NSImage?
+    @State private var loadedFromMemoryCache = false
+
+    static func == (lhs: AsyncCoverThumbnail, rhs: AsyncCoverThumbnail) -> Bool {
+        lhs.urlString == rhs.urlString &&
+        lhs.sourceId == rhs.sourceId &&
+        lhs.maxPixelSize == rhs.maxPixelSize
+    }
 
     var body: some View {
-        Group {
+        ZStack {
             if let image {
                 Image(nsImage: image)
                     .resizable()
                     .interpolation(.medium)
                     .aspectRatio(contentMode: .fill)
+                    .transition(loadedFromMemoryCache ? .identity : .opacity)
             } else {
-                ZStack {
-                    Color.secondary.opacity(0.14)
-                    Image(systemName: "book.closed.fill")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                }
+                StudioBreathingPlaceholder(
+                    cornerRadius: 0,
+                    iconName: sourceId == "copymanga" ? "photo.stack.fill" : "book.closed.fill"
+                )
             }
         }
         .task(id: "\(sourceId)::\(urlString)") {
             if let cached = CoverThumbnailCache.shared.cachedImage(urlString: urlString, sourceId: sourceId) {
+                loadedFromMemoryCache = true
                 self.image = cached
                 return
             }
+            guard let registry = CoverThumbnailCache.shared.resolveRegistry() else { return }
+            loadedFromMemoryCache = false
             self.image = nil
-            let referer = vm.sourceConfig(for: sourceId).baseURL
+            let referer = CoverThumbnailCache.shared.resolveReferer(for: sourceId)
             let loaded = await CoverThumbnailCache.shared.loadThumbnail(
                 urlString: urlString,
                 sourceId: sourceId,
-                registry: vm.sourceRegistry,
+                registry: registry,
                 referer: referer,
                 maxPixelSize: maxPixelSize
             )
             if !Task.isCancelled, let loaded {
-                self.image = loaded
+                withAnimation(StudioMotion.animation(StudioMotion.imageFade, reduceMotion: reduceMotion)) {
+                    self.image = loaded
+                }
             }
         }
     }

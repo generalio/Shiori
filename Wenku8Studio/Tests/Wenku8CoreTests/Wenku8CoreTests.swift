@@ -522,15 +522,17 @@ final class Wenku8CoreTests: XCTestCase {
 
     func testSourceRegistryURLAndInputRouting() {
         let registry = SourceRegistry.makeDefaultRegistry()
-        XCTAssertEqual(registry.allPlugins().map(\.descriptor.id), ["wenku8", "bilinovel"])
+        XCTAssertEqual(registry.allPlugins().map(\.descriptor.id), ["wenku8", "bilinovel", "copymanga"])
         XCTAssertTrue(registry.isEnabled("wenku8"))
-        XCTAssertFalse(registry.isEnabled("bilinovel"))
+        XCTAssertTrue(registry.isEnabled("bilinovel"))
+        XCTAssertTrue(registry.isEnabled("copymanga"))
 
         let wRoute = registry.routeBookInput("https://www.wenku8.cc/book/3115.htm")
         XCTAssertEqual(wRoute?.plugin.descriptor.id, "wenku8")
         XCTAssertEqual(wRoute?.bookId, "3115")
 
-        // Disabled by default -> not routed until hot-enabled
+        // Hot-disable bilinovel plugin -> URL no longer routes until re-enabled
+        registry.setEnabled(false, for: "bilinovel")
         XCTAssertNil(registry.routeBookInput("https://www.linovelib.com/novel/2704.html"))
 
         // Hot-enable bilinovel plugin -> routing works immediately

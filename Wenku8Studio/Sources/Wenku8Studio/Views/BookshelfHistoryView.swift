@@ -5,6 +5,8 @@ struct BookshelfHistoryView: View {
     @EnvironmentObject var vm: StudioViewModel
     @State private var filterScope: ShelfScope = .all
     @State private var filterText: String = ""
+    @State private var selectedSourceFilter: String? = nil
+    @State private var selectedMediaFilter: ContentKind? = nil
 
     enum ShelfScope: String, CaseIterable, Identifiable {
         case all = "全部"
@@ -54,15 +56,15 @@ struct BookshelfHistoryView: View {
             Spacer()
 
             StudioPillButton(
-                title: "双向同步",
+                title: "云书架同步",
                 systemImage: "arrow.triangle.2.circlepath.icloud",
                 size: .small,
                 isLoading: vm.isSyncingBookshelf,
                 isDisabled: vm.isSyncingBookshelf
             ) {
-                vm.syncBookshelfBidirectionally(silent: false)
+                vm.syncAllCloudShelves(silent: false)
             }
-            .help("已登录时自动与 wenku8 云端个人书架双向同步")
+            .help("按书源分别同步已登录的云端书架并合并到本地馆藏")
 
             if !vm.history.isEmpty {
                 StudioPillButton(title: "清空浏览", systemImage: "trash", variant: .destructive, size: .small) {
@@ -80,8 +82,17 @@ struct BookshelfHistoryView: View {
     private func filteredBookmarks() -> [BookmarkEntry] {
         let q = filterText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return vm.bookmarks.filter { entry in
+            if let sid = selectedSourceFilter, entry.sourceId != sid {
+                return false
+            }
+            if let media = selectedMediaFilter {
+                let entryKind = vm.contentKind(for: entry.sourceId)
+                if entryKind != media && entryKind != .mixed {
+                    return false
+                }
+            }
             let matchesGroup: Bool
-            if vm.activeCloudGroupFilter == "all" || vm.cloudBookcaseGroups.count <= 1 {
+            if vm.activeCloudGroupFilter == "all" || vm.cloudBookcaseGroups.count <= 1 || entry.sourceId != "wenku8" {
                 matchesGroup = true
             } else {
                 matchesGroup = entry.cloudGroupId == vm.activeCloudGroupFilter
@@ -94,9 +105,18 @@ struct BookshelfHistoryView: View {
 
     private func filteredHistory() -> [BookmarkEntry] {
         let q = filterText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !q.isEmpty else { return vm.history }
-        return vm.history.filter {
-            $0.title.lowercased().contains(q) || $0.author.lowercased().contains(q) || $0.id.contains(q)
+        return vm.history.filter { entry in
+            if let sid = selectedSourceFilter, entry.sourceId != sid {
+                return false
+            }
+            if let media = selectedMediaFilter {
+                let entryKind = vm.contentKind(for: entry.sourceId)
+                if entryKind != media && entryKind != .mixed {
+                    return false
+                }
+            }
+            guard !q.isEmpty else { return true }
+            return entry.title.lowercased().contains(q) || entry.author.lowercased().contains(q) || entry.id.contains(q)
         }
     }
 
@@ -140,6 +160,30 @@ struct BookshelfHistoryView: View {
                     Text("同步于 \(lastSync.formatted(date: .omitted, time: .shortened))")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
+                }
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    StudioFilterChip(title: "全部媒介", isSelected: selectedMediaFilter == nil) {
+                        selectedMediaFilter = nil
+                    }
+                    StudioFilterChip(title: "轻小说", systemImage: "book.fill", isSelected: selectedMediaFilter == .lightNovel) {
+                        selectedMediaFilter = .lightNovel
+                    }
+                    StudioFilterChip(title: "漫画", systemImage: "photo.stack.fill", isSelected: selectedMediaFilter == .manga) {
+                        selectedMediaFilter = .manga
+                    }
+                    Divider().frame(height: 16)
+                    StudioFilterChip(title: "全部书源", isSelected: selectedSourceFilter == nil) {
+                        selectedSourceFilter = nil
+                    }
+                    ForEach(vm.sourceRegistry.allPlugins(), id: \.descriptor.id) { plugin in
+                        let sid = plugin.descriptor.id
+                        StudioFilterChip(title: plugin.descriptor.displayName, isSelected: selectedSourceFilter == sid) {
+                            selectedSourceFilter = sid
+                        }
+                    }
                 }
             }
 

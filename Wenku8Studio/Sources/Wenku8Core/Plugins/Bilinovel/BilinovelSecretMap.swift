@@ -3510,16 +3510,23 @@ public enum BilinovelSecretMap {
     }
 
     public static func decodeParagraph(_ text: String) -> String {
-        guard containsPrivateUseCharacters(text) else { return text }
+        decodeParagraphWithStats(text).text
+    }
+
+    public static func decodeParagraphWithStats(_ text: String) -> (text: String, unmappedPUACount: Int) {
+        guard containsPrivateUseCharacters(text) else { return (text, 0) }
         var out = String()
         out.reserveCapacity(text.count)
+        var unmapped = 0
         for ch in text {
             if let mapped = secretMapping[ch] {
                 out.append(mapped)
             } else if ch.unicodeScalars.allSatisfy({ $0.value < 0xE000 || $0.value > 0xF8FF }) {
                 out.append(ch)
+            } else {
+                unmapped += 1
             }
         }
-        return out
+        return (out, unmapped)
     }
 }

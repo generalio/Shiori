@@ -3,7 +3,10 @@ import Wenku8Core
 
 struct ContentView: View {
     @EnvironmentObject var vm: StudioViewModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var sidebarNamespace
     @State private var focusTopSearch: Bool = false
+    @State private var showAccountPopover: Bool = false
 
     private var hideGlobalChrome: Bool {
         vm.selectedSection == .reader && vm.isFocusReadingMode
@@ -17,6 +20,7 @@ struct ContentView: View {
             VStack(spacing: 0) {
                 if !hideGlobalChrome {
                     topNavigationBar
+                        .transition(.move(edge: .top).combined(with: .opacity))
                     Divider().opacity(0.65)
                 }
                 topStatusBanners
@@ -24,6 +28,7 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .clipped()
             }
+            .animation(StudioMotion.animation(StudioMotion.standard, reduceMotion: reduceMotion), value: hideGlobalChrome)
             .background(Color(nsColor: .windowBackgroundColor))
         }
         .sheet(isPresented: $vm.showWebLoginSheet) {
@@ -74,7 +79,8 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Shiori")
                         .font(.headline.weight(.bold))
-                    Text(vm.baseURL.replacingOccurrences(of: "https://", with: ""))
+                    let activeCount = vm.sourceRegistry.enabledPlugins().count
+                    Text(activeCount > 0 ? "栞 · \(activeCount) 个已启用书源" : "栞 · 多源阅读工坊")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -91,6 +97,7 @@ struct ContentView: View {
                             isSelected: vm.selectedSection == section,
                             badgeCount: badgeCount(for: section),
                             isBusy: section == .tasks && vm.isDownloading,
+                            selectionNamespace: sidebarNamespace,
                             onSelect: {
                                 vm.navigateToSection(section)
                             }
@@ -128,19 +135,24 @@ struct ContentView: View {
                         Spacer()
                     }
                     .padding(8)
-                    .background(Color(nsColor: .controlBackgroundColor).opacity(0.8), in: RoundedRectangle(cornerRadius: 12))
+                    .background {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color(nsColor: .controlBackgroundColor).opacity(0.85))
+                            .shadow(color: StudioTokens.cardShadowColor, radius: 4, y: 1.5)
+                    }
                     .overlay {
-                        RoundedRectangle(cornerRadius: 12)
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
                             .strokeBorder(StudioTokens.hairlineStroke, lineWidth: 0.8)
                     }
-                    .shadow(color: StudioTokens.cardShadowColor, radius: 4, y: 1.5)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(StudioPressScaleStyle(pressedScale: 0.97))
                 .padding(.horizontal, 10)
                 .padding(.bottom, 12)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
                 .help("当前打开的书籍，点击返回目录")
             }
         }
+        .animation(StudioMotion.animation(StudioMotion.standard, reduceMotion: reduceMotion), value: vm.bookDetail?.scopedId)
         .background(.ultraThinMaterial)
     }
 
@@ -184,6 +196,7 @@ struct ContentView: View {
                     variant: .secondary,
                     size: .regular,
                     isLoading: vm.isLoadingBook || vm.isLoadingDiscovery || vm.isSyncingBookshelf,
+                    spinIconWhenLoading: true,
                     accessibilityLabel: "刷新当前页面"
                 ) {
                     vm.refreshCurrentView()
@@ -235,85 +248,222 @@ struct ContentView: View {
     }
 
     private var accountPillButton: some View {
-        Button {
-            if vm.isCloudSessionAvailable {
-                vm.navigateToSettingsCategory(.account)
-            } else {
-                vm.openWebLogin(for: "wenku8")
-            }
+        let enabledPlugins = vm.sourceRegistry.enabledPlugins()
+        let verifiedCount = enabledPlugins.filter { plugin in
+            vm.sourceAuthState(for: plugin.descriptor.id).isVerified
+        }.count
+
+        return Button {
+            showAccountPopover.toggle()
         } label: {
             HStack(spacing: 8) {
                 Circle()
-                    .fill(vm.isCloudSessionAvailable ? Color.green : Color.orange)
+                    .fill(verifiedCount > 0 ? Color.green : Color.orange)
                     .frame(width: 8, height: 8)
 
                 if let profile = vm.userProfile, !profile.username.isEmpty {
                     Text(profile.nickname.isEmpty ? profile.username : profile.nickname)
                         .font(.caption.weight(.semibold))
-                    if !profile.level.isEmpty {
+                    if enabledPlugins.count > 1 {
+                        Text("\(verifiedCount)/\(enabledPlugins.count) 源")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    } else if !profile.level.isEmpty {
                         Text(profile.level)
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
                 } else {
-                    Text(vm.isCloudSessionAvailable ? "已登录" : "未登录 · 点击登录")
+                    Text(verifiedCount > 0 ? "已认证 \(verifiedCount)/\(enabledPlugins.count) 源" : "书源账号 · 点击管理")
                         .font(.caption.weight(.medium))
                 }
+
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
-            .background(Color(nsColor: .controlBackgroundColor).opacity(0.86), in: Capsule())
+            .background {
+                Capsule()
+                    .fill(Color(nsColor: .controlBackgroundColor).opacity(0.86))
+                    .shadow(color: StudioTokens.cardShadowColor, radius: 4, y: 1.5)
+            }
             .overlay {
                 Capsule()
                     .strokeBorder(StudioTokens.hairlineStroke, lineWidth: 0.9)
             }
-            .shadow(color: StudioTokens.cardShadowColor, radius: 4, y: 1.5)
         }
         .buttonStyle(.plain)
-        .help(vm.isCloudSessionAvailable ? "点击查看账号与保活设置" : "点击网页登录 wenku8 账号")
+        .popover(isPresented: $showAccountPopover, arrowEdge: .bottom) {
+            multiSourceAccountPopover
+        }
+        .help("管理各已启用书源的登录会话与导入凭证")
+    }
+
+    private var multiSourceAccountPopover: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("多书源会话管理")
+                    .font(.headline)
+                Spacer()
+                StudioPillButton(title: "书源设置", systemImage: "slider.horizontal.3", variant: .subtle, size: .small) {
+                    showAccountPopover = false
+                    vm.navigateToSettingsCategory(.account)
+                }
+            }
+
+            Divider()
+
+            ForEach(vm.sourceRegistry.allPlugins(), id: \.descriptor.id) { plugin in
+                let sid = plugin.descriptor.id
+                let enabled = vm.sourceRegistry.isEnabled(sid)
+                let auth = vm.sourceAuthState(for: sid)
+
+                HStack(spacing: 10) {
+                    Circle()
+                        .fill(!enabled ? Color.secondary.opacity(0.35) : (auth.isVerified ? Color.green : (auth.hasCredentials ? Color.orange : Color.secondary.opacity(0.5))))
+                        .frame(width: 8, height: 8)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text(plugin.descriptor.displayName)
+                                .font(.callout.weight(.semibold))
+                            StudioSourceBadge(title: plugin.descriptor.shortBadge, sourceId: sid)
+                            if !enabled {
+                                Text("已停用")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Text(authStatusSummary(for: sid, auth: auth, enabled: enabled))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer()
+
+                    if enabled {
+                        HStack(spacing: 6) {
+                            StudioPillButton(
+                                title: sid == "wenku8" ? "登录" : "导入 / 登录",
+                                systemImage: sid == "wenku8" ? "person.crop.circle" : "key.fill",
+                                variant: auth.isVerified ? .secondary : .primary,
+                                size: .small
+                            ) {
+                                showAccountPopover = false
+                                vm.openWebLogin(for: sid)
+                            }
+                            if auth.hasCredentials {
+                                StudioCircleButton(systemImage: "arrow.clockwise", size: .small, accessibilityLabel: "验证 \(plugin.descriptor.displayName)") {
+                                    vm.testSourceSession(sourceId: sid)
+                                }
+                                .help("验证当前凭证")
+                                StudioCircleButton(systemImage: "trash", variant: .destructive, size: .small, accessibilityLabel: "清除 \(plugin.descriptor.displayName) 凭证") {
+                                    vm.clearSavedCookie(for: sid)
+                                }
+                                .help("清除保存的凭证")
+                            }
+                        }
+                    } else {
+                        StudioPillButton(title: "去启用", variant: .subtle, size: .small) {
+                            showAccountPopover = false
+                            vm.navigateToSettingsCategory(.source(sid))
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+        }
+        .padding(14)
+        .frame(width: 410)
+    }
+
+    private func authStatusSummary(for sourceId: String, auth: SourceAuthState, enabled: Bool) -> String {
+        guard enabled else { return "插件当前已停用" }
+        if sourceId == "wenku8", let profile = vm.userProfile, !profile.username.isEmpty {
+            return "\(profile.nickname.isEmpty ? profile.username : profile.nickname) · \(profile.level)"
+        }
+        if auth.isVerified {
+            return auth.accountLabel.isEmpty ? "会话已验证" : auth.accountLabel
+        }
+        if let err = auth.lastErrorMessage, !err.isEmpty {
+            return err
+        }
+        if sourceId == "copymanga" {
+            return auth.hasCredentials ? "已保存 Token，待验证" : "匿名可看漫 · 可选导入 Token 同步云书架"
+        }
+        return auth.hasCredentials ? "已保存凭证，待验证" : "未登录 / 待验证"
     }
 
     // MARK: - Status Banners
 
     @ViewBuilder
     private var topStatusBanners: some View {
-        if vm.errorBanner != nil || vm.statusBanner != nil {
-            VStack(spacing: 8) {
-                if let err = vm.errorBanner {
-                    HStack(spacing: 10) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
-                        Text(err)
-                            .font(.callout)
-                            .lineLimit(2)
-                        Spacer()
-                        StudioPillButton(title: "关闭", variant: .subtle, size: .small) {
-                            vm.errorBanner = nil
+        VStack(spacing: 8) {
+            if !vm.crossSourceAlternativeRoutes.isEmpty {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.triangle.branch")
+                        .foregroundStyle(.secondary)
+                    Text("此编号也可在其他已启用书源打开：")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    ForEach(vm.crossSourceAlternativeRoutes, id: \.sourceId) { alt in
+                        StudioPillButton(
+                            title: "在\(alt.displayName)查看 #\(alt.bookId)",
+                            size: .small
+                        ) {
+                            vm.loadBook(inputOverride: alt.bookId, sourceIdOverride: alt.sourceId)
                         }
                     }
-                    .studioCard(cornerRadius: 12, padding: 10, tint: .orange)
-                }
-
-                if let ok = vm.statusBanner {
-                    HStack(spacing: 10) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                        Text(ok)
-                            .font(.callout)
-                        Spacer()
-                        StudioPillButton(title: "打开目录", variant: .secondary, size: .small) {
-                            vm.openOutputFolder()
-                        }
-                        StudioPillButton(title: "关闭", variant: .subtle, size: .small) {
-                            vm.statusBanner = nil
-                        }
+                    Spacer()
+                    StudioCircleButton(systemImage: "xmark", variant: .subtle, size: .small, accessibilityLabel: "关闭跨源提示") {
+                        vm.crossSourceAlternativeRoutes = []
                     }
-                    .studioCard(cornerRadius: 12, padding: 10, tint: .green)
                 }
+                .studioCard(cornerRadius: 12, padding: 10)
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
-            .padding(.horizontal, 18)
-            .padding(.top, 10)
+            if let err = vm.errorBanner {
+                HStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text(err)
+                        .font(.callout)
+                        .lineLimit(2)
+                    Spacer()
+                    StudioPillButton(title: "关闭", variant: .subtle, size: .small) {
+                        vm.errorBanner = nil
+                    }
+                }
+                .studioCard(cornerRadius: 12, padding: 10, tint: .orange)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
+            if let ok = vm.statusBanner {
+                HStack(spacing: 10) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    Text(ok)
+                        .font(.callout)
+                    Spacer()
+                    StudioPillButton(title: "打开目录", variant: .secondary, size: .small) {
+                        vm.openOutputFolder()
+                    }
+                    StudioPillButton(title: "关闭", variant: .subtle, size: .small) {
+                        vm.statusBanner = nil
+                    }
+                }
+                .studioCard(cornerRadius: 12, padding: 10, tint: .green)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
         }
+        .padding(.horizontal, (vm.errorBanner != nil || vm.statusBanner != nil || !vm.crossSourceAlternativeRoutes.isEmpty) ? 18 : 0)
+        .padding(.top, (vm.errorBanner != nil || vm.statusBanner != nil || !vm.crossSourceAlternativeRoutes.isEmpty) ? 10 : 0)
+        .animation(StudioMotion.animation(StudioMotion.standard, reduceMotion: reduceMotion), value: vm.errorBanner)
+        .animation(StudioMotion.animation(StudioMotion.standard, reduceMotion: reduceMotion), value: vm.statusBanner)
+        .animation(StudioMotion.animation(StudioMotion.standard, reduceMotion: reduceMotion), value: vm.crossSourceAlternativeRoutes.count)
     }
 
     @ViewBuilder

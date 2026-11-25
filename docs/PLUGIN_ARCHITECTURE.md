@@ -1,6 +1,9 @@
-# Wenku8Studio 多书源插件化与聚合架构重构方案
+# Shiori 多书源插件化与双媒介聚合架构方案
 
-本文档基于对 [`ShqWW/bilinovel-download`](https://github.com/ShqWW/bilinovel-download) 的源码拆解以及当前仓库（`Wenku8Core` / `Wenku8Studio` / Python CLI）的架构分析，定义将单站架构演进为**可扩展多书源插件聚合架构**的改造方法与接入规范。
+本文档基于对 [`ShqWW/bilinovel-download`](https://github.com/ShqWW/bilinovel-download) 与 [`ShqWW/copymanga-download`](https://github.com/ShqWW/copymanga-download) 的拆解以及 `Wenku8Core` / `Wenku8Studio` 演进实践，定义 Shiori 的**多书源（轻小说 + 漫画）热插拔聚合架构**。
+
+- 统一领域术语定义见仓库根目录 [GLOSSARY.md](../GLOSSARY.md)。
+- 关键架构取舍（App API v3 选型、外部浏览器 + 可选本地 `curl_cffi` 桥接、`LocalShelf` 源级隔离同步、`0600` 本地状态文件权限）见 [docs/adr/](adr/)。
 
 ---
 

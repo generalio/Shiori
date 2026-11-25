@@ -14,12 +14,13 @@ public final class SourceRegistry: @unchecked Sendable {
 
     public static func makeDefaultRegistry(
         wenku8Client: Wenku8Client = Wenku8Client(),
-        bilinovelPlugin: BilinovelPlugin = BilinovelPlugin()
+        bilinovelPlugin: BilinovelPlugin = BilinovelPlugin(),
+        copymangaPlugin: CopymangaPlugin = CopymangaPlugin()
     ) -> SourceRegistry {
         let registry = SourceRegistry()
         registry.register(wenku8Client, enabled: true)
-        // Hot-pluggable plugin retained in codebase, disabled by default until further site adaptation.
-        registry.register(bilinovelPlugin, enabled: false)
+        registry.register(bilinovelPlugin, enabled: true)
+        registry.register(copymangaPlugin, enabled: true)
         return registry
     }
 
@@ -42,12 +43,18 @@ public final class SourceRegistry: @unchecked Sendable {
         return orderedIds.compactMap { pluginsById[$0] }
     }
 
-    public func enabledPlugins() -> [any BookSourcePlugin] {
+    public func enabledPlugins(matching contentKind: ContentKind? = nil) -> [any BookSourcePlugin] {
         lock.lock()
         defer { lock.unlock() }
         return orderedIds.compactMap { id in
-            guard enabledStateById[id] ?? true else { return nil }
-            return pluginsById[id]
+            guard enabledStateById[id] ?? true,
+                  let plugin = pluginsById[id] else { return nil }
+            if let contentKind {
+                guard plugin.descriptor.contentKind == contentKind || plugin.descriptor.contentKind == .mixed else {
+                    return nil
+                }
+            }
+            return plugin
         }
     }
 
@@ -69,21 +76,22 @@ public final class SourceRegistry: @unchecked Sendable {
         enabledStateById[id] = enabled
     }
 
-    /// Resolves raw user input (full URL or numeric ID) to the matching plugin + extracted book ID.
-    /// Explicitly matches domain-specific URLs first, then falls back to `preferredSourceId`.
+    /// Resolves raw user input (explicit prefix, full URL, or numeric/slug ID) to the matching plugin + extracted work ID.
+    /// Explicitly matches URLs & prefixes first, then falls back to `preferredSourceId`.
     public func routeBookInput(_ rawInput: String, preferredSourceId: String = "wenku8") -> (plugin: any BookSourcePlugin, bookId: String)? {
         let trimmed = rawInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
         let active = enabledPlugins()
-        let isURL = trimmed.contains("://") || trimmed.contains(".") || trimmed.contains("/")
+        let isExplicitURLOrPrefix = trimmed.contains("://") || trimmed.contains(".") || trimmed.contains("/") || trimmed.contains(":")
 
-        if isURL {
+        if isExplicitURLOrPrefix {
             for plugin in active {
                 if let bookId = plugin.canHandle(rawInput: trimmed), !bookId.isEmpty {
                     return (plugin, bookId)
                 }
             }
+            return nil
         }
 
         if let preferred = plugin(for: preferredSourceId),
@@ -99,6 +107,20 @@ public final class SourceRegistry: @unchecked Sendable {
             }
         }
         return nil
+    }
+
+    /// Returns other enabled plugins that could also interpret the same bare input (e.g., numeric IDs shared by Wenku8 & Bilinovel).
+    public func alternativeRoutes(for rawInput: String, excludingSourceId: String) -> [(plugin: any BookSourcePlugin, bookId: String)] {
+        let trimmed = rawInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              !trimmed.contains("://"),
+              !trimmed.contains(":") else { return [] }
+        return enabledPlugins().compactMap { plugin in
+            guard plugin.descriptor.id != excludingSourceId,
+                  let bid = plugin.canHandle(rawInput: trimmed),
+                  !bid.isEmpty else { return nil }
+            return (plugin, bid)
+        }
     }
 
     public func updateAllConfigs(_ configs: [String: SourceRuntimeConfig]) async {

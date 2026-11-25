@@ -56,7 +56,13 @@ public enum SettingsCategory: Hashable, Identifiable, Sendable {
         case .account: return "账号与云端"
         case .assembly: return "EPUB 拼装"
         case .about: return "关于"
-        case .source(let sid): return sid == "bilinovel" ? "哔哩轻小说" : (sid == "wenku8" ? "轻小说文库" : sid)
+        case .source(let sid):
+            switch sid {
+            case "bilinovel": return "哔哩轻小说"
+            case "copymanga": return "拷贝漫画"
+            case "wenku8": return "轻小说文库"
+            default: return sid
+            }
         }
     }
 
@@ -80,7 +86,12 @@ public enum SettingsCategory: Hashable, Identifiable, Sendable {
         case .account: return "person.crop.circle.fill"
         case .assembly: return "shippingbox.fill"
         case .about: return "info.circle.fill"
-        case .source(let sid): return sid == "bilinovel" ? "sparkles.rectangle.stack.fill" : "books.vertical.fill"
+        case .source(let sid):
+            switch sid {
+            case "bilinovel": return "sparkles.rectangle.stack.fill"
+            case "copymanga": return "photo.stack.fill"
+            default: return "books.vertical.fill"
+            }
         }
     }
 
@@ -92,9 +103,36 @@ public enum SettingsCategory: Hashable, Identifiable, Sendable {
         case .account: return .green
         case .assembly: return .orange
         case .about: return .indigo
-        case .source(let sid): return sid == "bilinovel" ? .pink : .blue
+        case .source(let sid):
+            switch sid {
+            case "bilinovel": return .pink
+            case "copymanga": return .teal
+            default: return .blue
+            }
         }
     }
+}
+
+public enum MangaReadingMode: String, CaseIterable, Identifiable, Codable, Sendable {
+    case webtoon = "条漫竖滑"
+    case singlePage = "单页翻页"
+
+    public var id: String { rawValue }
+}
+
+public enum MangaReadingDirection: String, CaseIterable, Identifiable, Codable, Sendable {
+    case rtl = "日漫右翻 (RTL)"
+    case ltr = "从左到右 (LTR)"
+
+    public var id: String { rawValue }
+}
+
+public enum MangaFitMode: String, CaseIterable, Identifiable, Codable, Sendable {
+    case fitWidth = "适应宽度"
+    case fitPage = "适应窗口"
+    case original = "原图比例"
+
+    public var id: String { rawValue }
 }
 
 public enum AppColorScheme: String, CaseIterable, Identifiable, Codable, Sendable {
@@ -355,6 +393,18 @@ public final class StudioViewModel: ObservableObject {
     @Published public var lastReadChapterByBook: [String: String] = [:]
     @Published public var lastReadPageRatioByChapter: [String: Double] = [:]
 
+    // Manga Reader & Export
+    @Published public var mangaReadingMode: MangaReadingMode = .webtoon
+    @Published public var mangaReadingDirection: MangaReadingDirection = .rtl
+    @Published public var mangaFitMode: MangaFitMode = .fitWidth
+    @Published public var mangaExportFormat: MangaExportFormat = .cbz
+    @Published public var mangaMergeSelectedChapters: Bool = true
+    @Published public var mangaCatalogReversed: Bool = false
+    @Published public var mangaLoadedImages: [String: NSImage] = [:]
+    @Published public var mangaFailedImageURLs: Set<String> = []
+    public let readerImageCache = BoundedReaderImageCache(maxMemoryBytes: 180 * 1024 * 1024)
+    private var inflightMangaImageURLs = Set<String>()
+
     public let availableSystemFontFamilies: [String] = NSFontManager.shared.availableFontFamilies.sorted()
     private let speechSynthesizer = AVSpeechSynthesizer()
     private var speechDelegateProxy: SpeechSynthesizerDelegateProxy?
@@ -363,6 +413,8 @@ public final class StudioViewModel: ObservableObject {
     @Published public var searchQuery: String = ""
     @Published public var searchScope: SearchScope = .articleName
     @Published public var selectedDiscoverySourceFilter: String? = nil // nil = 全部已启用渠道并发聚合
+    @Published public var selectedContentKindFilter: ContentKind? = nil // nil = 全部媒介
+    @Published public var crossSourceAlternativeRoutes: [(sourceId: String, displayName: String, bookId: String)] = []
     @Published public var activeDiscoverySourceId: String = "wenku8"
     @Published public var discoveryBooks: [AuthorBookItem] = []
     @Published public var discoveryTitle: String = "发现好书"
@@ -374,6 +426,8 @@ public final class StudioViewModel: ObservableObject {
     @Published public var discoveryRequiresCookie: Bool = false
     @Published public var discoveryChallengeSourceId: String? = nil
     @Published public var sourceConfigs: [String: SourceRuntimeConfig] = [:]
+    @Published public var sourceAuthStates: [String: SourceAuthState] = [:]
+    @Published public var curlCFFIStatus: CurlCFFIEnvironmentStatus?
     @Published public var activeLoginSourceId: String = "wenku8"
     @Published public var perSourceVerifyPassed: [String: Bool] = [:]
     @Published public var perSourceVerifyMessage: [String: String] = [:]
@@ -438,6 +492,7 @@ public final class StudioViewModel: ObservableObject {
     public let searchEngine: AggregatedSearchEngine
     private let client: Wenku8Client
     private let bilinovelPlugin: BilinovelPlugin
+    private let copymangaPlugin: CopymangaPlugin
     private let webKitFetchService = WebKitFetchService()
     private let epubBuilder = EPUBBuilder()
     private let persistenceQueue = DispatchQueue(label: "com.lightnovel.Shiori.persistence", qos: .utility)
@@ -455,11 +510,20 @@ public final class StudioViewModel: ObservableObject {
         self.outputDirectoryPath = downloads
         let wClient = Wenku8Client(baseURL: "https://www.wenku8.cc", cookie: "", timeout: 15, politeDelaySeconds: 0.25)
         let bPlugin = BilinovelPlugin(baseURL: "https://www.linovelib.com", cookie: "", timeout: 18, politeDelaySeconds: 1.5)
+        let cPlugin = CopymangaPlugin(baseURL: "https://mapi.hotmangasd.com", timeout: 18, politeDelaySeconds: 0.4)
         self.client = wClient
         self.bilinovelPlugin = bPlugin
-        self.sourceRegistry = SourceRegistry.makeDefaultRegistry(wenku8Client: wClient, bilinovelPlugin: bPlugin)
+        self.copymangaPlugin = cPlugin
+        self.sourceRegistry = SourceRegistry.makeDefaultRegistry(
+            wenku8Client: wClient,
+            bilinovelPlugin: bPlugin,
+            copymangaPlugin: cPlugin
+        )
         self.searchEngine = AggregatedSearchEngine(registry: self.sourceRegistry)
         self.sourceConfigs = Self.defaultSourceConfigs()
+        CoverThumbnailCache.shared.configure(registry: self.sourceRegistry) { [weak self] sid in
+            self?.sourceConfig(for: sid).baseURL ?? ""
+        }
         loadPersistedState()
         ensureDefaultSourceConfigsPopulated()
         selectedSection = startupSection
@@ -501,11 +565,25 @@ public final class StudioViewModel: ObservableObject {
             ),
             "bilinovel": SourceRuntimeConfig(
                 sourceId: "bilinovel",
-                isEnabled: false,
+                isEnabled: true,
                 baseURL: "https://www.linovelib.com",
                 cookie: "",
                 requestTimeout: 18,
                 politeDelaySeconds: 1.5,
+                autoRefreshCookie: false,
+                refreshIntervalMinutes: 30
+            ),
+            "copymanga": SourceRuntimeConfig(
+                sourceId: "copymanga",
+                isEnabled: true,
+                baseURL: "https://mapi.hotmangasd.com",
+                cookie: "",
+                userAgent: "COPY/3.0.6",
+                authorizationToken: "",
+                cdnRegion: "1",
+                preferHighQualityImages: true,
+                requestTimeout: 18,
+                politeDelaySeconds: 0.4,
                 autoRefreshCookie: false,
                 refreshIntervalMinutes: 30
             ),
@@ -527,17 +605,25 @@ public final class StudioViewModel: ObservableObject {
             wCfg.refreshIntervalMinutes = cookieRefreshIntervalMinutes
             sourceConfigs["wenku8"] = wCfg
         }
+        // Automatically migrate dead Copymanga legacy mirrors (e.g. api.2025copy.com -> mapi.hotmangasd.com)
+        if var cCfg = sourceConfigs["copymanga"] {
+            let migrated = CopymangaPlugin.migrateLegacyMirrorIfNeeded(cCfg.baseURL)
+            if migrated != cCfg.baseURL {
+                cCfg.baseURL = migrated
+                sourceConfigs["copymanga"] = cCfg
+            }
+        }
         for (sid, cfg) in sourceConfigs {
             sourceRegistry.setEnabled(cfg.isEnabled, for: sid)
         }
     }
 
     public var appVersionDisplay: String {
-        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "2.6.0"
+        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "2.7.0"
     }
 
     public var buildNumberDisplay: String {
-        (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? "6"
+        (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? "7"
     }
 
     public func navigateToSettingsCategory(_ category: SettingsCategory) {
@@ -719,6 +805,114 @@ public final class StudioViewModel: ObservableObject {
         showWebLoginSheet = true
     }
 
+    public func openExternalBrowserForLogin(sourceId: String) {
+        let cfg = sourceConfig(for: sourceId)
+        let targetURL: URL
+        if let auth = sourceRegistry.plugin(for: sourceId) as? any AuthenticatedSource {
+            targetURL = auth.loginURL(baseURL: cfg.baseURL)
+        } else {
+            targetURL = URL(string: cfg.baseURL) ?? URL(string: "https://www.wenku8.cc")!
+        }
+        NSWorkspace.shared.open(targetURL)
+        statusBanner = "已在系统浏览器打开 \(sourceBadgeTitle(for: sourceId))，完成登录/人机验证后请复制 cURL 或 Cookie 粘贴导入。"
+    }
+
+    public func sourceAuthState(for sourceId: String) -> SourceAuthState {
+        if let existing = sourceAuthStates[sourceId] {
+            return existing
+        }
+        let cfg = sourceConfig(for: sourceId)
+        let verified: Bool
+        let label: String
+        let err: String?
+        if sourceId == "wenku8" {
+            verified = isCloudSessionAvailable
+            label = userProfile.map { $0.nickname.isEmpty ? $0.username : $0.nickname } ?? ""
+            err = (cookieVerifyPassed == false) ? cookieVerifyMessage : nil
+        } else {
+            verified = perSourceVerifyPassed[sourceId] == true
+            label = cfg.authorizationToken.isEmpty ? "" : "Token 已配置"
+            err = (perSourceVerifyPassed[sourceId] == false) ? perSourceVerifyMessage[sourceId] : nil
+        }
+        return SourceAuthState(
+            sourceId: sourceId,
+            cookie: cfg.cookie,
+            userAgent: cfg.userAgent,
+            authorizationToken: cfg.authorizationToken,
+            accountLabel: label,
+            isVerified: verified,
+            supportsSilentRefresh: sourceId == "wenku8",
+            lastErrorMessage: err
+        )
+    }
+
+    @discardableResult
+    public func importCredentials(rawText: String, sourceId: String? = nil) -> ImportedCredentials {
+        let targetSid = sourceId ?? activeLoginSourceId
+        let parsed = CurlImportParser.parse(rawText)
+        guard !parsed.isEmpty else {
+            errorBanner = "未识别到有效的 Cookie、User-Agent 或 Token，请检查粘贴内容。"
+            return parsed
+        }
+
+        var cfg = sourceConfig(for: targetSid)
+        if !parsed.cookie.isEmpty {
+            cfg.cookie = parsed.cookie
+        }
+        if let ua = parsed.userAgent, !ua.isEmpty {
+            cfg.userAgent = ua
+            webKitFetchService.updateUserAgent(ua)
+        }
+        if let token = parsed.authorizationToken, !token.isEmpty {
+            cfg.authorizationToken = token
+        }
+        sourceConfigs[targetSid] = cfg
+        sourceAuthStates[targetSid] = SourceAuthState(
+            sourceId: targetSid,
+            cookie: cfg.cookie,
+            userAgent: cfg.userAgent,
+            authorizationToken: cfg.authorizationToken,
+            accountLabel: parsed.authorizationToken != nil ? "Token 已导入" : "",
+            isVerified: false,
+            supportsSilentRefresh: targetSid == "wenku8"
+        )
+
+        showWebLoginSheet = false
+        discoveryRequiresCookie = false
+        discoveryChallengeSourceId = nil
+        discoveryNotice = nil
+
+        if !cfg.cookie.isEmpty {
+            let syncURL = parsed.url ?? cfg.baseURL
+            Task {
+                await webKitFetchService.syncCookieHeader(cfg.cookie, forURL: syncURL)
+            }
+        }
+
+        if targetSid == "wenku8" {
+            customCookie = cfg.cookie
+            bookshelfSyncNotice = nil
+            savePersistedState()
+            testCookieValidity()
+        } else {
+            savePersistedState()
+            Task { await syncClientSettings() }
+            testSourceSession(sourceId: targetSid)
+        }
+        statusBanner = "已导入 \(sourceBadgeTitle(for: targetSid)) 凭证，正在验证连通性..."
+        return parsed
+    }
+
+    public func detectCurlCFFIEnvironment(for sourceId: String = "bilinovel") {
+        let preferred = sourceConfig(for: sourceId).pythonExecutablePath
+        Task.detached(priority: .userInitiated) {
+            let status = CurlCFFITransport.detectEnvironment(preferredPythonPath: preferred)
+            await MainActor.run { [weak self] in
+                self?.curlCFFIStatus = status
+            }
+        }
+    }
+
     public func activeDiscoveryChannels() -> [DiscoveryChannel] {
         let sid = selectedDiscoverySourceFilter ?? activeDiscoverySourceId
         if let disc = sourceRegistry.plugin(for: sid) as? any DiscoveryCapableSource {
@@ -747,9 +941,18 @@ public final class StudioViewModel: ObservableObject {
         Task { [weak self] in
             guard let self else { return }
             await self.syncClientSettings()
-            let res = await auth.verifySession(cookie: cfg.cookie, baseURL: cfg.baseURL)
+            let credential = !cfg.authorizationToken.isEmpty ? cfg.authorizationToken : cfg.cookie
+            let res = await auth.verifySession(cookie: credential, baseURL: cfg.baseURL)
             self.perSourceVerifyPassed[sourceId] = res.passed
             self.perSourceVerifyMessage[sourceId] = res.message
+            var st = self.sourceAuthState(for: sourceId)
+            st.isVerified = res.passed
+            st.lastVerifiedAt = res.passed ? Date() : st.lastVerifiedAt
+            st.lastErrorMessage = res.passed ? nil : res.message
+            if res.passed && st.accountLabel.isEmpty {
+                st.accountLabel = cfg.authorizationToken.isEmpty ? "会话有效" : "Token 有效"
+            }
+            self.sourceAuthStates[sourceId] = st
         }
     }
 
@@ -774,6 +977,9 @@ public final class StudioViewModel: ObservableObject {
             if let sourceId { return sourceId }
             if trimmed.contains("linovelib") || trimmed.contains("readpai") || trimmed.contains("bilinovel") {
                 return "bilinovel"
+            }
+            if trimmed.contains("mangafun") || trimmed.contains("mangacopy") || trimmed.contains("copymanga") || trimmed.contains("hotmangasd") {
+                return "copymanga"
             }
             return "wenku8"
         }()
@@ -989,6 +1195,14 @@ public final class StudioViewModel: ObservableObject {
         let targetSourceId = targetPlugin.descriptor.id
         let targetBookId = routed?.bookId ?? query
 
+        if sourceIdOverride == nil {
+            crossSourceAlternativeRoutes = sourceRegistry
+                .alternativeRoutes(for: query, excludingSourceId: targetSourceId)
+                .map { ($0.plugin.descriptor.id, $0.plugin.descriptor.displayName, $0.bookId) }
+        } else {
+            crossSourceAlternativeRoutes = []
+        }
+
         if recordNavigation {
             let alreadyViewing = (selectedSection == .catalog && bookDetail?.bookId == targetBookId && bookDetail?.sourceId == targetSourceId)
             if !alreadyViewing {
@@ -1180,6 +1394,15 @@ public final class StudioViewModel: ObservableObject {
 
         if let cached = chapterContentCache[cacheKey] ?? chapterContentCache[chapter.id] {
             previewChapter = cached
+            if cached.contentKind == .manga {
+                mangaFailedImageURLs = []
+                if let detail = bookDetail {
+                    lastReadChapterByBook[detail.scopedId] = chapter.id
+                    savePersistedState()
+                }
+                ensureMangaPageWindowLoaded(currentIndex: 0, in: cached)
+                return
+            }
             var imgs: [String: NSImage] = [:]
             for url in cached.imageURLs {
                 if let img = coverImageCache[url] {
@@ -1198,6 +1421,10 @@ public final class StudioViewModel: ObservableObject {
 
         isLoadingPreview = true
         previewImages = [:]
+        mangaLoadedImages = [:]
+        mangaFailedImageURLs = []
+        inflightMangaImageURLs = []
+        readerImageCache.clear()
 
         let activeBook = bookDetail
         let plugin = sourceRegistry.plugin(for: bookSourceId) ?? client
@@ -1231,7 +1458,10 @@ public final class StudioViewModel: ObservableObject {
                     self.lastReadChapterByBook[detail.scopedId] = chapter.id
                     self.savePersistedState()
                 }
-                if !content.imageURLs.isEmpty {
+                if content.contentKind == .manga {
+                    self.isLoadingPreview = false
+                    self.ensureMangaPageWindowLoaded(currentIndex: 0, in: content)
+                } else if !content.imageURLs.isEmpty {
                     let downloaded = try await plugin.downloadImages(
                         urls: content.imageURLs,
                         referer: placeholderBook.baseURL,
@@ -1437,6 +1667,59 @@ public final class StudioViewModel: ObservableObject {
         savePersistedState()
     }
 
+    public func setDiscoveryContentKindFilter(_ kind: ContentKind?) {
+        selectedContentKindFilter = kind
+        if let kind,
+           let selectedSid = selectedDiscoverySourceFilter,
+           let plugin = sourceRegistry.plugin(for: selectedSid),
+           plugin.descriptor.contentKind != kind && plugin.descriptor.contentKind != .mixed {
+            selectedDiscoverySourceFilter = nil
+        }
+        if let kind,
+           let firstMatch = sourceRegistry.enabledPlugins(matching: kind).first {
+            activeDiscoverySourceId = firstMatch.descriptor.id
+        }
+    }
+
+    public func contentKind(for sourceId: String) -> ContentKind {
+        sourceRegistry.plugin(for: sourceId)?.descriptor.contentKind ?? .lightNovel
+    }
+
+    public func syncAllCloudShelves(silent: Bool = false) {
+        if isCloudSessionAvailable {
+            syncBookshelfBidirectionally(silent: silent)
+        }
+        let copyCfg = sourceConfig(for: "copymanga")
+        if copyCfg.isEnabled && !copyCfg.authorizationToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            Task { [weak self] in
+                guard let self else { return }
+                await self.syncClientSettings()
+                do {
+                    let page = try await self.copymangaPlugin.fetchAllCloudBookcase(baseURL: copyCfg.baseURL)
+                    self.bookmarks = LocalShelfReconciler.mergeReadOnlyCloudItems(
+                        localEntries: self.bookmarks,
+                        remoteItems: page.items,
+                        sourceId: "copymanga",
+                        publisherFallback: "拷贝漫画"
+                    )
+                    self.lastBookshelfSyncAt = Date()
+                    self.savePersistedState()
+                    if !silent {
+                        self.statusBanner = "已同步拷贝漫画云端收藏（\(page.items.count) 部）至本地馆藏"
+                    }
+                } catch {
+                    self.perSourceVerifyPassed["copymanga"] = false
+                    self.perSourceVerifyMessage["copymanga"] = error.localizedDescription
+                    if !silent {
+                        self.bookshelfSyncNotice = "拷贝漫画云收藏同步失败（本地馆藏不受影响）：\(error.localizedDescription)"
+                    }
+                }
+            }
+        } else if !isCloudSessionAvailable && !silent {
+            bookshelfSyncNotice = "当前未登录支持云同步的书源，所有收藏均保留在本地馆藏。"
+        }
+    }
+
     public func performDiscoverySearch(page: Int = 1) {
         let q = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return }
@@ -1449,8 +1732,10 @@ public final class StudioViewModel: ObservableObject {
         if let filter = selectedDiscoverySourceFilter,
            let name = sourceRegistry.plugin(for: filter)?.descriptor.shortBadge {
             discoveryTitle = "搜索「\(q)」· \(name)"
+        } else if let kind = selectedContentKindFilter {
+            discoveryTitle = "聚合搜索「\(q)」· \(kind == .manga ? "漫画" : "轻小说")"
         } else {
-            discoveryTitle = "全渠道聚合搜索「\(q)」"
+            discoveryTitle = "全书源聚合搜索「\(q)」"
         }
         lastDiscoverySource = .search(query: q, scope: searchScope, sourceFilter: selectedDiscoverySourceFilter)
 
@@ -1461,7 +1746,8 @@ public final class StudioViewModel: ObservableObject {
                 query: q,
                 scope: searchScope,
                 page: page,
-                sourceId: selectedDiscoverySourceFilter
+                sourceId: selectedDiscoverySourceFilter,
+                contentKindFilter: selectedContentKindFilter
             )
             self.discoveryBooks = res.items
             self.discoveryPage = page
@@ -2020,8 +2306,18 @@ public final class StudioViewModel: ObservableObject {
     public func clearSavedCookie(for sourceId: String = "wenku8") {
         if var cfg = sourceConfigs[sourceId] {
             cfg.cookie = ""
+            cfg.authorizationToken = ""
             sourceConfigs[sourceId] = cfg
         }
+        sourceAuthStates[sourceId] = SourceAuthState(
+            sourceId: sourceId,
+            cookie: "",
+            userAgent: sourceConfig(for: sourceId).userAgent,
+            authorizationToken: "",
+            accountLabel: "",
+            isVerified: false,
+            supportsSilentRefresh: sourceId == "wenku8"
+        )
         if sourceId == "wenku8" {
             customCookie = ""
             cookieVerifyMessage = nil
@@ -2189,6 +2485,103 @@ public final class StudioViewModel: ObservableObject {
         startDownload(detail: detail, chosenVolumes: allVolumes, forceMergedSingle: true)
     }
 
+    public func ensureMangaPageWindowLoaded(currentIndex: Int, in content: ChapterContent) {
+        let urls = content.imageURLs
+        guard !urls.isEmpty else { return }
+        let windowIndices = BoundedReaderImageCache.prefetchWindowIndices(
+            currentIndex: currentIndex,
+            totalCount: urls.count,
+            radius: 5
+        )
+        let windowURLSet = Set(windowIndices.map { urls[$0] })
+
+        // Trim UI dictionary to bounded window around current index to prevent memory bloat
+        if mangaLoadedImages.count > 24 {
+            mangaLoadedImages = mangaLoadedImages.filter { windowURLSet.contains($0.key) }
+        }
+
+        let sourceId = content.chapter.sourceId
+        let plugin = sourceRegistry.plugin(for: sourceId) ?? client
+        let referer = bookDetail?.baseURL
+
+        let urlsToFetch: [String] = windowIndices.compactMap { idx in
+            let url = urls[idx]
+            if let cached = readerImageCache.image(forKey: url) {
+                if mangaLoadedImages[url] == nil {
+                    mangaLoadedImages[url] = cached
+                }
+                return nil
+            }
+            guard !inflightMangaImageURLs.contains(url), !mangaFailedImageURLs.contains(url) else {
+                return nil
+            }
+            return url
+        }
+
+        guard !urlsToFetch.isEmpty else { return }
+        for u in urlsToFetch {
+            inflightMangaImageURLs.insert(u)
+        }
+
+        let expectedChapId = content.chapter.id
+        Task { [weak self] in
+            guard let self else { return }
+            await withTaskGroup(of: (String, DownloadedImageAsset?, NSImage?).self) { group in
+                let maxActive = 3
+                var nextIdx = 0
+                func enqueue(_ target: String) {
+                    group.addTask {
+                        guard let asset = try? await plugin.downloadImage(url: target, referer: referer) else {
+                            return (target, nil, nil)
+                        }
+                        // Decode & decompress WebP/JPEG off the main thread so scrolling & page flips stay 60/120fps
+                        let decoded: NSImage? = await Task.detached(priority: .userInitiated) {
+                            let opts: [CFString: Any] = [kCGImageSourceShouldCacheImmediately: true]
+                            if let src = CGImageSourceCreateWithData(asset.data as CFData, nil),
+                               let cgImg = CGImageSourceCreateImageAtIndex(src, 0, opts as CFDictionary) {
+                                return NSImage(cgImage: cgImg, size: NSSize(width: cgImg.width, height: cgImg.height))
+                            }
+                            return NSImage(data: asset.data)
+                        }.value
+                        return (target, asset, decoded)
+                    }
+                }
+                for _ in 0..<min(maxActive, urlsToFetch.count) {
+                    let target = urlsToFetch[nextIdx]
+                    nextIdx += 1
+                    enqueue(target)
+                }
+                while let (url, asset, img) = await group.next() {
+                    await MainActor.run {
+                        self.inflightMangaImageURLs.remove(url)
+                        guard self.previewChapter?.chapter.id == expectedChapId else { return }
+                        if let asset, let img {
+                            let approxBytes = max(asset.data.count, asset.width * asset.height * 4)
+                            self.readerImageCache.insert(key: url, data: asset.data, decodedImage: img, costBytes: approxBytes)
+                            self.mangaLoadedImages[url] = img
+                            self.mangaFailedImageURLs.remove(url)
+                        } else {
+                            self.mangaFailedImageURLs.insert(url)
+                        }
+                    }
+                    if nextIdx < urlsToFetch.count {
+                        let target = urlsToFetch[nextIdx]
+                        nextIdx += 1
+                        enqueue(target)
+                    }
+                }
+            }
+        }
+    }
+
+    public func retryMangaPage(url: String, in content: ChapterContent) {
+        mangaFailedImageURLs.remove(url)
+        inflightMangaImageURLs.remove(url)
+        if let idx = content.imageURLs.firstIndex(of: url) {
+            ensureMangaPageWindowLoaded(currentIndex: idx, in: content)
+        }
+    }
+
     public func startDownloadSelected() {
         guard let detail = bookDetail else {
             errorBanner = "请先拉取书籍目录"
@@ -2213,6 +2606,10 @@ public final class StudioViewModel: ObservableObject {
         chosenVolumes: [(VolumeItem, [ChapterItem])],
         forceMergedSingle: Bool
     ) {
+        if detail.contentKind == .manga {
+            startMangaDownload(detail: detail, chosenVolumes: chosenVolumes, forceMergedSingle: forceMergedSingle)
+            return
+        }
         errorBanner = nil
         statusBanner = nil
         isDownloading = true
@@ -2369,6 +2766,128 @@ public final class StudioViewModel: ObservableObject {
         }
     }
 
+    private func startMangaDownload(
+        detail: BookDetail,
+        chosenVolumes: [(VolumeItem, [ChapterItem])],
+        forceMergedSingle: Bool
+    ) {
+        errorBanner = nil
+        statusBanner = nil
+        isDownloading = true
+        progressFraction = 0
+        let format = mangaExportFormat
+        let mergeSingle = forceMergedSingle || mangaMergeSelectedChapters
+        currentStageText = "准备导出漫画（\(format.rawValue)）..."
+        navigateToSection(.tasks)
+        savePersistedState()
+
+        let outDir = URL(fileURLWithPath: outputDirectoryPath, isDirectory: true)
+        let concurrencySnapshot = maxConcurrency
+        let flatChapters = chosenVolumes.flatMap(\.1)
+
+        activeDownloadTask = Task { [weak self] in
+            guard let self else { return }
+            await syncClientSettings()
+            let plugin = self.sourceRegistry.plugin(for: detail.sourceId) ?? self.client
+            do {
+                var chapterInputs: [MangaChapterExportInput] = []
+                let coverAsset: DownloadedImageAsset? = detail.coverURL.isEmpty
+                    ? nil
+                    : (try? await plugin.downloadImage(url: detail.coverURL, referer: detail.baseURL))
+
+                for (idx, chap) in flatChapters.enumerated() {
+                    try Task.checkCancellation()
+                    self.currentStageText = "拉取章节图片目录（\(idx + 1)/\(flatChapters.count)）：\(chap.title)"
+                    let content = try await plugin.fetchChapterContent(chapter: chap, book: detail)
+                    self.currentStageText = "下载「\(chap.title)」（共 \(content.imageURLs.count) 页）..."
+                    let imgMap = try await plugin.downloadImages(
+                        urls: content.imageURLs,
+                        referer: detail.baseURL,
+                        maxConcurrency: concurrencySnapshot,
+                        onProgress: { [weak self] done, total in
+                            Task { @MainActor [weak self] in
+                                guard let self else { return }
+                                let chapBase = Double(idx) / Double(max(1, flatChapters.count))
+                                let chapFrac = (Double(done) / Double(max(1, total))) / Double(max(1, flatChapters.count))
+                                self.progressFraction = min(0.88, (chapBase + chapFrac) * 0.88)
+                            }
+                        }
+                    )
+                    let orderedPages = content.imageURLs.compactMap { imgMap[$0] }
+                    if !orderedPages.isEmpty {
+                        chapterInputs.append(MangaChapterExportInput(chapterTitle: chap.title, pages: orderedPages))
+                    }
+                }
+
+                guard !chapterInputs.isEmpty else {
+                    throw MangaArchiveExporterError.noPagesToExport
+                }
+
+                self.currentStageText = "正在封装 \(format.rawValue)..."
+                self.progressFraction = 0.92
+
+                func safeFileName(_ raw: String) -> String {
+                    let invalid = CharacterSet(charactersIn: "/\\:?*\"<>|")
+                    return raw.components(separatedBy: invalid).joined(separator: "_")
+                }
+
+                var produced: [OutputArtifact] = []
+                if mergeSingle {
+                    let rangeSuffix: String
+                    if chapterInputs.count == 1 {
+                        rangeSuffix = chapterInputs[0].chapterTitle
+                    } else {
+                        rangeSuffix = "\(chapterInputs.first!.chapterTitle)-\(chapterInputs.last!.chapterTitle)"
+                    }
+                    let fileName = "\(safeFileName(detail.title))-\(safeFileName(rangeSuffix)).\(format.fileExtension)"
+                    let destURL = outDir.appendingPathComponent(fileName)
+                    if format == .cbz {
+                        try MangaArchiveExporter.exportCBZ(chapters: chapterInputs, outputURL: destURL)
+                    } else {
+                        try MangaArchiveExporter.exportImageEPUB(detail: detail, chapters: chapterInputs, coverAsset: coverAsset, outputURL: destURL)
+                    }
+                    let fileSize = (try? FileManager.default.attributesOfItem(atPath: destURL.path)[.size] as? Int64) ?? 0
+                    produced.append(OutputArtifact(
+                        title: "\(detail.title) · \(rangeSuffix) (\(format.fileExtension.uppercased()))",
+                        filePath: destURL.path,
+                        fileSizeBytes: fileSize
+                    ))
+                } else {
+                    for chapInput in chapterInputs {
+                        let fileName = "\(safeFileName(detail.title))-\(safeFileName(chapInput.chapterTitle)).\(format.fileExtension)"
+                        let destURL = outDir.appendingPathComponent(fileName)
+                        if format == .cbz {
+                            try MangaArchiveExporter.exportCBZ(chapters: [chapInput], outputURL: destURL)
+                        } else {
+                            try MangaArchiveExporter.exportImageEPUB(detail: detail, chapters: [chapInput], coverAsset: coverAsset, outputURL: destURL)
+                        }
+                        let fileSize = (try? FileManager.default.attributesOfItem(atPath: destURL.path)[.size] as? Int64) ?? 0
+                        produced.append(OutputArtifact(
+                            title: "\(detail.title) · \(chapInput.chapterTitle) (\(format.fileExtension.uppercased()))",
+                            filePath: destURL.path,
+                            fileSizeBytes: fileSize
+                        ))
+                    }
+                }
+
+                self.outputs.insert(contentsOf: produced, at: 0)
+                self.progressFraction = 1.0
+                self.currentStageText = "漫画导出完成（共 \(produced.count) 个 \(format.fileExtension.uppercased()) 文件）"
+                self.statusBanner = "已导出 \(produced.count) 个漫画文件至 \(self.outputDirectoryPath)"
+                self.appendLog("漫画导出完成：\(produced.map(\.filePath).joined(separator: ", "))")
+                self.savePersistedState()
+            } catch is CancellationError {
+                self.currentStageText = "已取消漫画导出"
+                self.appendLog("用户取消了漫画导出任务")
+            } catch {
+                self.errorBanner = error.localizedDescription
+                self.currentStageText = "漫画导出失败"
+                self.appendLog("漫画导出失败：\(error.localizedDescription)")
+            }
+            self.isDownloading = false
+        }
+    }
+
     public func cancelDownload() {
         activeDownloadTask?.cancel()
         currentStageText = "正在取消..."
@@ -2494,7 +3013,7 @@ public final class StudioViewModel: ObservableObject {
         )
         persistenceQueue.async {
             if let data = try? JSONEncoder().encode(state) {
-                try? data.write(to: targetURL, options: .atomic)
+                try? SecureStateFileWriter.write(data, to: targetURL)
             }
         }
     }

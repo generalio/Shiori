@@ -17,7 +17,13 @@ extension Wenku8Client: BookSourcePlugin, DiscoveryCapableSource, AuthenticatedS
     public nonisolated func canHandle(rawInput: String) -> String? {
         let trimmed = rawInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        if trimmed.lowercased().contains("wenku8") || trimmed.allSatisfy(\.isNumber) {
+        let lower = trimmed.lowercased()
+        if lower.hasPrefix("wenku8:") || lower.hasPrefix("wk8:") {
+            let suffix = trimmed.split(separator: ":", maxSplits: 1).last.map(String.init) ?? ""
+            let bid = Self.extractBookId(from: suffix)
+            return bid.isEmpty ? nil : bid
+        }
+        if lower.contains("wenku8") || trimmed.allSatisfy(\.isNumber) {
             let bid = Self.extractBookId(from: trimmed)
             return bid.isEmpty ? nil : bid
         }

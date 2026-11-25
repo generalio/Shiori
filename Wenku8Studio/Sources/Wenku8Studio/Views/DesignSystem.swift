@@ -13,6 +13,39 @@ extension EnvironmentValues {
     }
 }
 
+// MARK: - Motion Tokens (macOS Native, Reduce-Motion Safe)
+
+enum StudioMotion {
+    /// Fast tactile feedback (hover, button press, icon bounce)
+    static let micro: Animation = .snappy(duration: 0.14)
+    /// Standard spring for structural transitions (sidebar pill, banners, foldouts, chips)
+    static let standard: Animation = .spring(response: 0.26, dampingFraction: 0.86)
+    /// Smooth cross-dissolve / directional slide for workspace & page transitions
+    static let page: Animation = .smooth(duration: 0.20)
+    /// Soft fade-in when async covers or manga pages finish decoding
+    static let imageFade: Animation = .easeOut(duration: 0.18)
+
+    static func animation(_ preferred: Animation, reduceMotion: Bool) -> Animation? {
+        reduceMotion ? .easeInOut(duration: 0.08) : preferred
+    }
+}
+
+/// Lightweight static placeholder surface (zero continuous per-cell timer/animation ticks).
+struct StudioBreathingPlaceholder: View {
+    var cornerRadius: CGFloat = 8
+    var iconName: String = "book.closed.fill"
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(Color.secondary.opacity(0.13))
+            Image(systemName: iconName)
+                .font(.title3)
+                .foregroundStyle(.secondary.opacity(0.55))
+        }
+    }
+}
+
 // MARK: - Design Tokens
 
 enum StudioTokens {
@@ -95,11 +128,14 @@ struct StudioCircleButton: View {
     var variant: StudioButtonVariant = .secondary
     var size: StudioControlSize = .regular
     var isLoading: Bool = false
+    var spinIconWhenLoading: Bool = false
+    var bounceTrigger: Bool? = nil
     var isDisabled: Bool = false
     var accessibilityLabel: String? = nil
     let action: () -> Void
 
     @Environment(\.studioAccentColor) private var studioAccent
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovered = false
 
     private var diameter: CGFloat { size.circleDiameter }
@@ -112,35 +148,45 @@ struct StudioCircleButton: View {
             ZStack {
                 Circle()
                     .fill(backgroundFill)
+                    .shadow(
+                        color: shadowColor,
+                        radius: 4.5,
+                        x: 0,
+                        y: 2
+                    )
                     .overlay {
                         Circle()
                             .strokeBorder(borderColor, lineWidth: 0.9)
                     }
-                    .shadow(
-                        color: shadowColor,
-                        radius: isHovered && !isDisabled ? 8 : 5,
-                        x: 0,
-                        y: isHovered && !isDisabled ? 3 : 2
-                    )
 
-                if isLoading {
+                if isLoading && !spinIconWhenLoading {
                     ProgressView()
                         .controlSize(.small)
                         .tint(foregroundColor)
                 } else {
-                    Image(systemName: systemImage)
+                    let baseIcon = Image(systemName: systemImage)
                         .font(.system(size: iconFontSize, weight: .semibold))
                         .foregroundStyle(foregroundColor)
+                        .contentTransition(.symbolEffect(.replace))
+                    if spinIconWhenLoading {
+                        baseIcon
+                            .symbolEffect(.rotate, options: .repeating, isActive: isLoading && !reduceMotion)
+                    } else if let bounceTrigger {
+                        baseIcon
+                            .symbolEffect(.bounce, value: reduceMotion ? false : bounceTrigger)
+                    } else {
+                        baseIcon
+                    }
                 }
             }
             .frame(width: diameter, height: diameter)
-            .scaleEffect(isHovered && !isDisabled ? 1.04 : 1.0)
+            .scaleEffect(isHovered && !isDisabled && !reduceMotion ? 1.04 : 1.0)
             .contentShape(Circle())
         }
-        .buttonStyle(StudioPressScaleStyle(pressedScale: 0.93, isDisabled: isDisabled))
+        .buttonStyle(StudioPressScaleStyle(pressedScale: reduceMotion ? 1.0 : 0.93, isDisabled: isDisabled))
         .disabled(isDisabled || isLoading)
         .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.14)) {
+            withAnimation(StudioMotion.animation(StudioMotion.micro, reduceMotion: reduceMotion)) {
                 isHovered = hovering
             }
         }
@@ -259,17 +305,20 @@ struct StudioPillButton: View {
             .foregroundStyle(foregroundColor)
             .padding(.horizontal, size.horizontalPadding)
             .padding(.vertical, size.verticalPadding)
-            .background(backgroundFill, in: Capsule())
+            .background {
+                Capsule()
+                    .fill(backgroundFill)
+                    .shadow(
+                        color: shadowColor,
+                        radius: 4,
+                        x: 0,
+                        y: 1.5
+                    )
+            }
             .overlay {
                 Capsule()
                     .strokeBorder(borderColor, lineWidth: 0.9)
             }
-            .shadow(
-                color: shadowColor,
-                radius: isHovered && !isDisabled ? 7 : 4,
-                x: 0,
-                y: isHovered && !isDisabled ? 3 : 1.5
-            )
             .contentShape(Capsule())
         }
         .buttonStyle(StudioPressScaleStyle(pressedScale: 0.97, isDisabled: isDisabled))
@@ -459,6 +508,11 @@ struct StudioFilterChip: View {
                             ? effectiveTint.opacity(0.15)
                             : (isHovered ? Color(nsColor: .controlBackgroundColor) : Color(nsColor: .controlBackgroundColor).opacity(0.76))
                     )
+                    .shadow(
+                        color: isSelected ? effectiveTint.opacity(0.12) : StudioTokens.cardShadowColor,
+                        radius: 3.5,
+                        y: 1.5
+                    )
             }
             .overlay {
                 Capsule()
@@ -467,11 +521,6 @@ struct StudioFilterChip: View {
                         lineWidth: isSelected ? 1.0 : 0.8
                     )
             }
-            .shadow(
-                color: isSelected ? effectiveTint.opacity(0.12) : StudioTokens.cardShadowColor,
-                radius: 4,
-                y: 1.5
-            )
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -554,9 +603,11 @@ struct StudioNavTabRow: View, Equatable {
     let isSelected: Bool
     let badgeCount: Int
     let isBusy: Bool
+    var selectionNamespace: Namespace.ID? = nil
     let onSelect: () -> Void
 
     @Environment(\.studioAccentColor) private var studioAccent
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovered = false
 
     static func == (lhs: StudioNavTabRow, rhs: StudioNavTabRow) -> Bool {
@@ -574,7 +625,7 @@ struct StudioNavTabRow: View, Equatable {
                     .font(.system(size: 14, weight: isSelected ? .semibold : .medium))
                     .foregroundStyle(isSelected ? studioAccent : Color.secondary)
                     .frame(width: 20, height: 20)
-                    .transaction { $0.animation = nil }
+                    .scaleEffect(isSelected && !reduceMotion ? 1.06 : 1.0)
 
                 Text(section.rawValue)
                     .font(.callout.weight(isSelected ? .semibold : .regular))
@@ -589,6 +640,7 @@ struct StudioNavTabRow: View, Equatable {
                 } else if badgeCount > 0 {
                     Text("\(badgeCount)")
                         .font(.caption2.monospacedDigit().weight(.medium))
+                        .contentTransition(.numericText())
                         .foregroundStyle(isSelected ? studioAccent : Color.secondary)
                         .padding(.horizontal, 7)
                         .padding(.vertical, 2)
@@ -596,31 +648,40 @@ struct StudioNavTabRow: View, Equatable {
                             isSelected ? studioAccent.opacity(0.16) : Color.primary.opacity(0.07),
                             in: Capsule()
                         )
+                        .animation(StudioMotion.animation(StudioMotion.micro, reduceMotion: reduceMotion), value: badgeCount)
                 }
             }
             .padding(.horizontal, 11)
             .padding(.vertical, 8)
             .background {
-                RoundedRectangle(cornerRadius: StudioTokens.sidebarRowRadius, style: .continuous)
-                    .fill(
-                        isSelected
-                            ? studioAccent.opacity(0.14)
-                            : (isHovered ? Color.primary.opacity(0.055) : Color.clear)
-                    )
-            }
-            .overlay {
-                if isSelected {
-                    RoundedRectangle(cornerRadius: StudioTokens.sidebarRowRadius, style: .continuous)
-                        .strokeBorder(studioAccent.opacity(0.22), lineWidth: 0.8)
+                ZStack {
+                    if isSelected {
+                        let activePill = RoundedRectangle(cornerRadius: StudioTokens.sidebarRowRadius, style: .continuous)
+                            .fill(studioAccent.opacity(0.14))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: StudioTokens.sidebarRowRadius, style: .continuous)
+                                    .strokeBorder(studioAccent.opacity(0.22), lineWidth: 0.8)
+                            }
+                        if let ns = selectionNamespace {
+                            activePill.matchedGeometryEffect(id: "StudioSidebarActivePill", in: ns)
+                        } else {
+                            activePill
+                        }
+                    } else if isHovered {
+                        RoundedRectangle(cornerRadius: StudioTokens.sidebarRowRadius, style: .continuous)
+                            .fill(Color.primary.opacity(0.055))
+                    }
                 }
             }
             .contentShape(RoundedRectangle(cornerRadius: StudioTokens.sidebarRowRadius, style: .continuous))
         }
         .buttonStyle(.plain)
         .onHover { hovering in
-            isHovered = hovering
+            withAnimation(StudioMotion.animation(StudioMotion.micro, reduceMotion: reduceMotion)) {
+                isHovered = hovering
+            }
         }
-        .transaction { $0.animation = nil }
+        .animation(StudioMotion.animation(StudioMotion.standard, reduceMotion: reduceMotion), value: isSelected)
     }
 }
 
@@ -748,7 +809,11 @@ struct StudioSourceBadge: View {
     @Environment(\.studioAccentColor) private var studioAccent
 
     private var badgeTint: Color {
-        sourceId == "bilinovel" ? Color.pink : studioAccent
+        switch sourceId {
+        case "bilinovel": return Color.pink
+        case "copymanga": return Color.teal
+        default: return studioAccent
+        }
     }
 
     var body: some View {
@@ -778,6 +843,7 @@ struct StudioCardModifier: ViewModifier {
             .background {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .fill(.regularMaterial)
+                    .shadow(color: StudioTokens.cardShadowColor, radius: 7, y: 2)
                     .overlay {
                         if let tint {
                             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
@@ -792,7 +858,6 @@ struct StudioCardModifier: ViewModifier {
                         lineWidth: 0.9
                     )
             }
-            .shadow(color: StudioTokens.cardShadowColor, radius: 8, y: 2)
     }
 }
 

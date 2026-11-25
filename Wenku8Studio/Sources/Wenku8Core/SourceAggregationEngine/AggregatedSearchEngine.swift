@@ -39,13 +39,14 @@ public struct AggregatedSearchEngine: Sendable {
         query: String,
         scope: SearchScope,
         page: Int = 1,
-        sourceId: String? = nil
+        sourceId: String? = nil,
+        contentKindFilter: ContentKind? = nil
     ) async -> AggregatedSearchResult {
         let targets: [any BookSourcePlugin]
         if let sourceId, let single = registry.plugin(for: sourceId) {
             targets = [single]
         } else {
-            targets = registry.enabledPlugins()
+            targets = registry.enabledPlugins(matching: contentKindFilter)
         }
 
         guard !targets.isEmpty else {

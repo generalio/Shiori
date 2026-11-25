@@ -19,28 +19,50 @@ public actor BilinovelPlugin: BookSourcePlugin, DiscoveryCapableSource, Authenti
 
     private var baseURL: String
     private var cookie: String
+    private var userAgent: String
+    private var transportEngine: SourceTransportEngine
+    private var pythonExecutablePath: String
     private var requestTimeout: TimeInterval
     private var politeDelaySeconds: Double
     private let httpRuntime: HTTPRuntime
+    private let usesInjectedHTTPRuntime: Bool
     private var browserRuntime: (any SourceBrowserRuntime)?
 
     public init(
         baseURL: String = "https://www.linovelib.com",
         cookie: String = "",
+        userAgent: String = HTTPRuntime.defaultUserAgent,
         timeout: TimeInterval = 18,
-        politeDelaySeconds: Double = 1.5
+        politeDelaySeconds: Double = 1.5,
+        httpRuntime: HTTPRuntime? = nil
     ) {
         self.baseURL = Wenku8Client.normalizeBaseURL(baseURL)
         self.cookie = Wenku8Client.normalizeCookie(cookie)
+        self.userAgent = userAgent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? HTTPRuntime.defaultUserAgent
+            : userAgent
+        self.transportEngine = .native
+        self.pythonExecutablePath = ""
         self.requestTimeout = timeout
         self.politeDelaySeconds = politeDelaySeconds
-        self.httpRuntime = HTTPRuntime(timeout: timeout)
+        if let httpRuntime {
+            self.httpRuntime = httpRuntime
+            self.usesInjectedHTTPRuntime = true
+        } else {
+            self.httpRuntime = HTTPRuntime(timeout: timeout)
+            self.usesInjectedHTTPRuntime = false
+        }
     }
 
     public nonisolated func canHandle(rawInput: String) -> String? {
         let trimmed = rawInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         let lower = trimmed.lowercased()
+        if lower.hasPrefix("bili:") || lower.hasPrefix("bilinovel:") {
+            let suffix = trimmed.split(separator: ":", maxSplits: 1).last.map(String.init) ?? ""
+            let bid = Self.extractBookId(from: suffix)
+            return bid.isEmpty ? nil : bid
+        }
         if lower.contains("linovelib.com") || lower.contains("bilinovel.com") {
             let bid = Self.extractBookId(from: trimmed)
             return bid.isEmpty ? nil : bid
@@ -56,8 +78,28 @@ public actor BilinovelPlugin: BookSourcePlugin, DiscoveryCapableSource, Authenti
             ? Self.officialMirrors[0]
             : Wenku8Client.normalizeBaseURL(config.baseURL)
         cookie = Wenku8Client.normalizeCookie(config.cookie)
+        let ua = config.userAgent.trimmingCharacters(in: .whitespacesAndNewlines)
+        userAgent = ua.isEmpty ? HTTPRuntime.defaultUserAgent : ua
+        transportEngine = config.transportEngine
+        pythonExecutablePath = config.pythonExecutablePath
         requestTimeout = max(5, config.requestTimeout)
         politeDelaySeconds = max(0, config.politeDelaySeconds)
+
+        if !usesInjectedHTTPRuntime {
+            if transportEngine == .curlCFFI {
+                let env = CurlCFFITransport.detectEnvironment(preferredPythonPath: pythonExecutablePath)
+                if env.isAvailable, let py = env.pythonPath {
+                    await httpRuntime.setTransport(CurlCFFITransport(
+                        pythonExecutable: py,
+                        impersonateProfile: CurlCFFITransport.inferImpersonateProfile(fromUserAgent: userAgent)
+                    ))
+                } else {
+                    await httpRuntime.setTransport(nil)
+                }
+            } else {
+                await httpRuntime.setTransport(nil)
+            }
+        }
     }
 
     public func setBrowserRuntime(_ runtime: (any SourceBrowserRuntime)?) async {
@@ -71,7 +113,7 @@ public actor BilinovelPlugin: BookSourcePlugin, DiscoveryCapableSource, Authenti
             throw SourceError.invalidInput("无效 URL：\(urlString)")
         }
 
-        // Sync cookies from browser store when available
+        // Sync cookies from browser store when explicit cookie is empty
         var effectiveCookie = cookie
         if effectiveCookie.isEmpty, let runtime = browserRuntime {
             effectiveCookie = await runtime.currentCookiesHeader(forURL: urlString)
@@ -80,36 +122,47 @@ public actor BilinovelPlugin: BookSourcePlugin, DiscoveryCapableSource, Authenti
             effectiveCookie = effectiveCookie.isEmpty ? "night=1" : "\(effectiveCookie); night=1"
         }
 
-        if let runtime = browserRuntime {
-            await httpRuntime.enforceRateLimit(hostKey: descriptor.id, minDelaySeconds: politeDelaySeconds)
-            let page = try await runtime.fetchRenderedHTML(
+        // Direct HTTP (native URLSession or curl_cffi bridge) first for speed & concurrency
+        do {
+            let (html, _, pairs) = try await httpRuntime.fetchText(
+                url: url,
                 sourceId: descriptor.id,
-                url: urlString,
-                stripAbsoluteHiddenParagraphs: stripAbsoluteParagraphs
+                encoding: .utf8,
+                cookie: effectiveCookie,
+                referer: referer ?? baseURL,
+                userAgent: userAgent,
+                minDelaySeconds: politeDelaySeconds,
+                timeout: requestTimeout
             )
-            if HTTPRuntime.looksLikeCloudflareChallenge(page.html) {
-                throw SourceError.challengeRequired(
-                    sourceId: descriptor.id,
-                    url: urlString,
-                    message: "哔哩轻小说需要完成人机验证/登录后访问，请打开「网页登录 / 验证」窗口"
-                )
+            if !pairs.isEmpty {
+                cookie = HTTPRuntime.mergeCookieHeader(existing: cookie, updating: pairs)
             }
-            return page.html
+            return html
+        } catch let err as SourceError {
+            // Fall back to WKWebView DOM runtime only on challenge/403 when browserRuntime is attached
+            switch err {
+            case .challengeRequired, .httpError(403, _):
+                if let runtime = browserRuntime {
+                    await httpRuntime.enforceRateLimit(hostKey: descriptor.id, minDelaySeconds: politeDelaySeconds)
+                    let page = try await runtime.fetchRenderedHTML(
+                        sourceId: descriptor.id,
+                        url: urlString,
+                        stripAbsoluteHiddenParagraphs: stripAbsoluteParagraphs
+                    )
+                    if HTTPRuntime.looksLikeCloudflareChallenge(page.html) {
+                        throw SourceError.challengeRequired(
+                            sourceId: descriptor.id,
+                            url: urlString,
+                            message: "哔哩轻小说触发 Cloudflare 验证，请在系统浏览器完成验证后通过「导入 Cookie / cURL」更新会话"
+                        )
+                    }
+                    return page.html
+                }
+                throw err
+            default:
+                throw err
+            }
         }
-
-        let (html, _, pairs) = try await httpRuntime.fetchText(
-            url: url,
-            sourceId: descriptor.id,
-            encoding: .utf8,
-            cookie: effectiveCookie,
-            referer: referer ?? baseURL,
-            minDelaySeconds: politeDelaySeconds,
-            timeout: requestTimeout
-        )
-        if !pairs.isEmpty {
-            cookie = HTTPRuntime.mergeCookieHeader(existing: cookie, updating: pairs)
-        }
-        return html
     }
 
     // MARK: - Core BookSourcePlugin
@@ -162,7 +215,7 @@ public actor BilinovelPlugin: BookSourcePlugin, DiscoveryCapableSource, Authenti
         let catalogURL = "\(baseURL)/novel/\(bookId)/catalog"
         onProgress?("正在拉取分卷与章节目录...")
         let catalogHTML = try await fetchHTML(urlString: catalogURL, referer: mainURL)
-        var volumes = Self.parseCatalogPage(html: catalogHTML, bookTitle: parsedMain.title, baseURL: baseURL)
+        var volumes = Self.parseCatalogPage(html: catalogHTML, bookTitle: parsedMain.title, baseURL: baseURL, bookId: bookId)
 
         // Resolve adjacent missing-link chapter placeholders when needed (best-effort)
         volumes = try await resolveMissingChapterLinksIfNeeded(volumes: volumes)
@@ -196,6 +249,7 @@ public actor BilinovelPlugin: BookSourcePlugin, DiscoveryCapableSource, Authenti
         var allTokens: [ChapterToken] = []
         var allImages: [String] = []
         var seenImages = Set<String>()
+        var unresolvedPUACount = 0
 
         var pageNo = 1
         var currentURL = chapter.url
@@ -216,6 +270,7 @@ public actor BilinovelPlugin: BookSourcePlugin, DiscoveryCapableSource, Authenti
             )
 
             allTokens.append(contentsOf: parsed.tokens)
+            unresolvedPUACount += parsed.unresolvedPUACount
             for img in parsed.imageURLs where seenImages.insert(img).inserted {
                 allImages.append(img)
             }
@@ -228,11 +283,25 @@ public actor BilinovelPlugin: BookSourcePlugin, DiscoveryCapableSource, Authenti
             }
         }
 
-        return ChapterContent(chapter: chapter, tokens: allTokens, imageURLs: allImages)
+        let warning: String? = unresolvedPUACount > 0
+            ? "检测到 \(unresolvedPUACount) 个未解码私有区字符，哔哩轻小说可能已更新混淆字库映射，部分汉字可能显示异常。"
+            : nil
+        return ChapterContent(
+            chapter: chapter,
+            tokens: allTokens,
+            imageURLs: allImages,
+            contentKind: .lightNovel,
+            warningMessage: warning
+        )
     }
 
     public func downloadImage(url: String, referer: String?) async throws -> DownloadedImageAsset {
-        try await httpRuntime.downloadSingleImage(urlString: url, referer: referer ?? baseURL, cookie: cookie)
+        try await httpRuntime.downloadSingleImage(
+            urlString: url,
+            referer: referer ?? baseURL,
+            cookie: cookie,
+            userAgent: userAgent
+        )
     }
 
     public func downloadImages(
@@ -245,6 +314,7 @@ public actor BilinovelPlugin: BookSourcePlugin, DiscoveryCapableSource, Authenti
             urls: urls,
             referer: referer ?? baseURL,
             cookie: cookie,
+            userAgent: userAgent,
             maxConcurrency: maxConcurrency,
             onProgress: onProgress
         )
@@ -472,7 +542,7 @@ public actor BilinovelPlugin: BookSourcePlugin, DiscoveryCapableSource, Authenti
         )
     }
 
-    public static func parseCatalogPage(html: String, bookTitle: String, baseURL: String) -> [VolumeItem] {
+    public static func parseCatalogPage(html: String, bookTitle: String, baseURL: String, bookId: String = "") -> [VolumeItem] {
         var volumes: [VolumeItem] = []
         let volPattern = #"<div[^>]*class=["'][^"']*volume\s+clearfix[^"']*["'][^>]*>([\s\S]*?)</ul>\s*</div>"#
         guard let volRegex = try? NSRegularExpression(pattern: volPattern) else { return [] }
@@ -480,6 +550,7 @@ public actor BilinovelPlugin: BookSourcePlugin, DiscoveryCapableSource, Authenti
         let volMatches = volRegex.matches(in: html, range: NSRange(location: 0, length: nsHTML.length))
 
         let chapRegex = try? NSRegularExpression(pattern: #"<li[^>]*class=["'][^"']*col-4[^"']*["'][^>]*>[\s\S]*?<a[^>]+href=["']([^"']*)["'][^>]*>([\s\S]*?)</a>"#)
+        let idScope = bookId.isEmpty ? "" : "\(bookId)_"
 
         for (vIdx, vm) in volMatches.enumerated() {
             let block = nsHTML.substring(with: vm.range(at: 1))
@@ -502,7 +573,7 @@ public actor BilinovelPlugin: BookSourcePlugin, DiscoveryCapableSource, Authenti
                     resolvedURL = HTTPRuntime.resolveURL(rawHref, baseURL: baseURL)
                 }
 
-                let chapId = "bili_v\(vIdx + 1)_c\(cIdx + 1)"
+                let chapId = "bili_\(idScope)v\(vIdx + 1)_c\(cIdx + 1)"
                 let isIllus = rawTitle == "插图" || rawTitle == "彩页" || rawTitle.contains("插图")
                 chapters.append(
                     ChapterItem(
@@ -518,7 +589,7 @@ public actor BilinovelPlugin: BookSourcePlugin, DiscoveryCapableSource, Authenti
             }
 
             if !chapters.isEmpty {
-                volumes.append(VolumeItem(id: "bili_vol_\(vIdx + 1)", index: vIdx + 1, title: volTitle, chapters: chapters))
+                volumes.append(VolumeItem(id: "bili_\(idScope)vol_\(vIdx + 1)", index: vIdx + 1, title: volTitle, chapters: chapters))
             }
         }
         return volumes
@@ -528,6 +599,7 @@ public actor BilinovelPlugin: BookSourcePlugin, DiscoveryCapableSource, Authenti
         public let tokens: [ChapterToken]
         public let imageURLs: [String]
         public let nextSubpageURL: String?
+        public let unresolvedPUACount: Int
     }
 
     public static func parseChapterPageHTML(
@@ -548,21 +620,24 @@ public actor BilinovelPlugin: BookSourcePlugin, DiscoveryCapableSource, Authenti
             contentHTML = String(contentHTML[..<range.lowerBound])
         }
 
-        // Remove known noise elements & HTML comments
+        // Remove known noise elements, inline position:absolute decoy paragraphs & HTML comments
         let noisePatterns = [
             #"<!--[\s\S]*?-->"#,
             #"<div[^>]*id=["'](?:show-more-images|hidden-images)["'][^>]*>[\s\S]*?</div>"#,
             #"<div[^>]*class=["'][^"']*(?:google-auto-placed|dag)[^"']*["'][^>]*>[\s\S]*?</div>"#,
+            #"<p[^>]*style=["'][^"']*position\s*:\s*absolute[^"']*["'][^>]*>[\s\S]*?</p>"#,
+            #"<p[^>]*style=["'][^"']*display\s*:\s*none[^"']*["'][^>]*>[\s\S]*?</p>"#,
             #"<p\d+[^>]*>[\s\S]*?</p\d+>"#,
             #"<script[\s\S]*?</script>"#,
         ]
         for pattern in noisePatterns {
-            contentHTML = contentHTML.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
+            contentHTML = contentHTML.replacingOccurrences(of: pattern, with: "", options: [.regularExpression, .caseInsensitive])
         }
 
         var tokens: [ChapterToken] = []
         var imageURLs: [String] = []
         var seenImages = Set<String>()
+        var unresolvedPUACount = 0
 
         // Walk `<p>...</p>` and `<img ...>` in document order
         let tokenPattern = #"<p[^>]*>([\s\S]*?)</p>|<img[^>]+>"#
@@ -602,11 +677,13 @@ public actor BilinovelPlugin: BookSourcePlugin, DiscoveryCapableSource, Authenti
                 }
             }
 
-            // Restore PUA scrambled characters on affected / final paragraphs
+            // Restore PUA scrambled characters on affected paragraphs and detect unmapped drift
             for idx in paragraphIndices {
                 if case .paragraph(let txt) = tokens[idx] {
                     if usesWoff2 || BilinovelSecretMap.containsPrivateUseCharacters(txt) {
-                        tokens[idx] = .paragraph(BilinovelSecretMap.decodeParagraph(txt))
+                        let decoded = BilinovelSecretMap.decodeParagraphWithStats(txt)
+                        tokens[idx] = .paragraph(decoded.text)
+                        unresolvedPUACount += decoded.unmappedPUACount
                     }
                 }
             }
@@ -620,7 +697,12 @@ public actor BilinovelPlugin: BookSourcePlugin, DiscoveryCapableSource, Authenti
             ? HTTPRuntime.resolveURL(nextRel, baseURL: baseURL)
             : nil
 
-        return ParsedBilinovelChapterPage(tokens: tokens, imageURLs: imageURLs, nextSubpageURL: nextSubpageURL)
+        return ParsedBilinovelChapterPage(
+            tokens: tokens,
+            imageURLs: imageURLs,
+            nextSubpageURL: nextSubpageURL,
+            unresolvedPUACount: unresolvedPUACount
+        )
     }
 
     public static func extractPrevChapterLink(from html: String, baseURL: String) -> String? {

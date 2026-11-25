@@ -214,6 +214,7 @@ public struct VolumeItem: Identifiable, Codable, Hashable, Sendable {
 public struct BookDetail: Codable, Hashable, Sendable {
     public let bookId: String
     public let sourceId: String
+    public let contentKind: ContentKind
     public let baseURL: String
     public let title: String
     public let author: String
@@ -235,6 +236,7 @@ public struct BookDetail: Codable, Hashable, Sendable {
     public init(
         bookId: String,
         sourceId: String = "wenku8",
+        contentKind: ContentKind = .lightNovel,
         baseURL: String,
         title: String,
         author: String,
@@ -253,6 +255,7 @@ public struct BookDetail: Codable, Hashable, Sendable {
     ) {
         self.bookId = bookId
         self.sourceId = sourceId
+        self.contentKind = contentKind
         self.baseURL = baseURL
         self.title = title
         self.author = author
@@ -274,6 +277,7 @@ public struct BookDetail: Codable, Hashable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         bookId = try c.decode(String.self, forKey: .bookId)
         sourceId = try c.decodeIfPresent(String.self, forKey: .sourceId) ?? "wenku8"
+        contentKind = try c.decodeIfPresent(ContentKind.self, forKey: .contentKind) ?? .lightNovel
         baseURL = try c.decode(String.self, forKey: .baseURL)
         title = try c.decode(String.self, forKey: .title)
         author = try c.decode(String.self, forKey: .author)
@@ -301,11 +305,21 @@ public struct ChapterContent: Sendable {
     public let chapter: ChapterItem
     public let tokens: [ChapterToken]
     public let imageURLs: [String]
+    public let contentKind: ContentKind
+    public let warningMessage: String?
 
-    public init(chapter: ChapterItem, tokens: [ChapterToken], imageURLs: [String]) {
+    public init(
+        chapter: ChapterItem,
+        tokens: [ChapterToken],
+        imageURLs: [String],
+        contentKind: ContentKind = .lightNovel,
+        warningMessage: String? = nil
+    ) {
         self.chapter = chapter
         self.tokens = tokens
         self.imageURLs = imageURLs
+        self.contentKind = contentKind
+        self.warningMessage = warningMessage
     }
 }
 

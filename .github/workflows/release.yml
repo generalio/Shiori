@@ -78,7 +78,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.pkg.outputs.version }}
-          name: "Shiori ${VERSION}"
+          name: "Shiori ${{ steps.pkg.outputs.version }}"
           generate_release_notes: true
           files: |
             dist_release/*.dmg

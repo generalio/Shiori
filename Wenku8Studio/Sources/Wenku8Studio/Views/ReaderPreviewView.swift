@@ -44,67 +44,98 @@ struct ReaderPreviewView: View {
             VStack(spacing: 0) {
                 if !vm.isFocusReadingMode {
                     readerToolbar
+                        .transition(.move(edge: .top).combined(with: .opacity))
                 }
 
                 if vm.isLoadingPreview {
                     VStack(spacing: 12) {
                         ProgressView()
-                        Text("正在加载章节正文与插图...")
+                        Text("正在加载章节内容...")
                             .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(vm.readerTheme.backgroundColor)
                 } else if let content = vm.previewChapter {
-                    GeometryReader { geo in
-                        ZStack(alignment: .bottom) {
-                            Group {
-                                if vm.readerPageMode == .scroll {
-                                    scrollReaderBody(content)
-                                } else {
-                                    SimulationPageReaderView(
-                                        content: content,
-                                        pages: paginatedPages,
-                                        currentPageIndex: $currentPageIndex,
-                                        externalTurnSignal: $pageTurnSignal,
-                                        containerSize: geo.size,
-                                        isDualPage: isDualSpreadActive,
-                                        pageMode: vm.readerPageMode,
-                                        onOpenLightbox: { idx in
-                                            lightboxImageIndex = idx
-                                        },
-                                        onPreviousChapter: {
-                                            if let prev = vm.adjacentChapter(offset: -1) {
-                                                vm.openChapterInReader(prev, startAtLastPage: true)
-                                            }
-                                        },
-                                        onNextChapter: {
-                                            if let next = vm.adjacentChapter(offset: 1) {
-                                                vm.openChapterInReader(next, startAtLastPage: false)
-                                            }
-                                        },
-                                        onToggleFocus: {
-                                            withAnimation(.easeInOut(duration: 0.18)) {
-                                                vm.isFocusReadingMode.toggle()
-                                            }
-                                        }
-                                    )
+                    if let warn = content.warningMessage, !warn.isEmpty {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                            Text(warn)
+                                .font(.caption)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(Color.orange.opacity(0.12))
+                    }
+
+                    if content.contentKind == .manga {
+                        MangaReaderView(
+                            content: content,
+                            onPreviousChapter: {
+                                if let prev = vm.adjacentChapter(offset: -1) {
+                                    vm.openChapterInReader(prev, startAtLastPage: false)
+                                }
+                            },
+                            onNextChapter: {
+                                if let next = vm.adjacentChapter(offset: 1) {
+                                    vm.openChapterInReader(next, startAtLastPage: false)
                                 }
                             }
+                        )
+                    } else {
+                        GeometryReader { geo in
+                            ZStack(alignment: .bottom) {
+                                Group {
+                                    if vm.readerPageMode == .scroll {
+                                        scrollReaderBody(content)
+                                    } else {
+                                        SimulationPageReaderView(
+                                            content: content,
+                                            pages: paginatedPages,
+                                            currentPageIndex: $currentPageIndex,
+                                            externalTurnSignal: $pageTurnSignal,
+                                            containerSize: geo.size,
+                                            isDualPage: isDualSpreadActive,
+                                            pageMode: vm.readerPageMode,
+                                            onOpenLightbox: { idx in
+                                                lightboxImageIndex = idx
+                                            },
+                                            onPreviousChapter: {
+                                                if let prev = vm.adjacentChapter(offset: -1) {
+                                                    vm.openChapterInReader(prev, startAtLastPage: true)
+                                                }
+                                            },
+                                            onNextChapter: {
+                                                if let next = vm.adjacentChapter(offset: 1) {
+                                                    vm.openChapterInReader(next, startAtLastPage: false)
+                                                }
+                                            },
+                                            onToggleFocus: {
+                                                withAnimation(.easeInOut(duration: 0.18)) {
+                                                    vm.isFocusReadingMode.toggle()
+                                                }
+                                            }
+                                        )
+                                    }
+                                }
 
-                            if vm.isFocusReadingMode {
-                                focusModeFloatingBar(content: content)
-                            } else if vm.readerPageMode != .scroll && paginatedPages.count > 1 {
-                                compactPageProgressScrubber(content: content)
+                                if vm.isFocusReadingMode {
+                                    focusModeFloatingBar(content: content)
+                                } else if vm.readerPageMode != .scroll && paginatedPages.count > 1 {
+                                    compactPageProgressScrubber(content: content)
+                                }
                             }
-                        }
-                        .onAppear {
-                            readerViewportSize = geo.size
-                            recomputePages(resetOrRestorePosition: true)
-                        }
-                        .onChange(of: geo.size) { _, newSize in
-                            if abs(newSize.width - readerViewportSize.width) > 4 || abs(newSize.height - readerViewportSize.height) > 4 {
-                                readerViewportSize = newSize
-                                recomputePages(resetOrRestorePosition: false)
+                            .onAppear {
+                                readerViewportSize = geo.size
+                                recomputePages(resetOrRestorePosition: true)
+                            }
+                            .onChange(of: geo.size) { _, newSize in
+                                if abs(newSize.width - readerViewportSize.width) > 4 || abs(newSize.height - readerViewportSize.height) > 4 {
+                                    readerViewportSize = newSize
+                                    recomputePages(resetOrRestorePosition: false)
+                                }
                             }
                         }
                     }
@@ -511,13 +542,20 @@ struct ReaderPreviewView: View {
                     .font(.headline)
                     .lineLimit(1)
                 if let prog = vm.readerProgressInfo() {
-                    if vm.readerPageMode != .scroll && !paginatedPages.isEmpty {
+                    if let content = vm.previewChapter, content.contentKind == .manga {
+                        Text("第 \(prog.current)/\(prog.total) 话 · 共 \(content.imageURLs.count) 页")
+                            .font(.caption2)
+                            .contentTransition(.numericText())
+                            .foregroundStyle(.secondary)
+                    } else if vm.readerPageMode != .scroll && !paginatedPages.isEmpty {
                         Text("第 \(prog.current)/\(prog.total) 章 · 第 \(currentPageIndex + 1)/\(paginatedPages.count) 页")
                             .font(.caption2)
+                            .contentTransition(.numericText())
                             .foregroundStyle(.secondary)
                     } else {
                         Text("第 \(prog.current) / \(prog.total) 章")
                             .font(.caption2)
+                            .contentTransition(.numericText())
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -525,73 +563,90 @@ struct ReaderPreviewView: View {
 
             Spacer()
 
-            // Page turn mode segmented control (仿真翻页 / 平移翻页 / 上下滚动)
-            StudioSegmentedTabs(selection: $vm.readerPageMode, items: ReaderPageMode.allCases)
-                .frame(width: 224)
+            if vm.previewChapter?.contentKind == .manga {
+                StudioSegmentedTabs(selection: $vm.mangaReadingMode, items: MangaReadingMode.allCases)
+                    .frame(width: 176)
 
-            // TTS Speech button
-            StudioCircleButton(
-                systemImage: vm.isSpeakingChapter ? "stop.circle.fill" : "speaker.wave.2",
-                variant: vm.isSpeakingChapter ? .primary : .secondary,
-                size: .small,
-                isDisabled: vm.previewChapter == nil,
-                accessibilityLabel: vm.isSpeakingChapter ? "停止语音朗读" : "开始本地语音听书"
-            ) {
-                vm.toggleSpeechForCurrentChapter()
-            }
-            .help(vm.isSpeakingChapter ? "停止语音朗读" : "开始本地语音听书")
-
-            // Bookmark current page button
-            if let chap = vm.previewChapter?.chapter {
-                let curPage = paginatedPages.indices.contains(currentPageIndex) ? paginatedPages[currentPageIndex] : nil
-                let isMarked = vm.isReaderPageBookmarked(chapterId: chap.id, pageIndex: curPage?.id ?? 0)
-                StudioCircleButton(
-                    systemImage: isMarked ? "bookmark.fill" : "bookmark",
-                    variant: isMarked ? .primary : .secondary,
-                    size: .small,
-                    accessibilityLabel: "添加/移除页内书签"
-                ) {
-                    vm.toggleReaderBookmark(
-                        chapter: chap,
-                        pageIndex: curPage?.id ?? 0,
-                        progressRatio: curPage?.progressRatio ?? 0,
-                        excerpt: curPage?.excerpt ?? chap.title
+                if vm.mangaReadingMode == .singlePage {
+                    StudioSegmentedTabs(
+                        selection: $vm.mangaReadingDirection,
+                        items: MangaReadingDirection.allCases,
+                        title: { $0 == .rtl ? "日漫 RTL" : "左到右 LTR" }
                     )
+                    .frame(width: 168)
                 }
-                .help("添加/移除页内书签")
-            }
 
-            // Compact color-swatch theme selector
-            HStack(spacing: 6) {
-                ForEach(ReaderTheme.allCases) { theme in
-                    Button {
-                        vm.readerTheme = theme
-                    } label: {
-                        Circle()
-                            .fill(theme.swatchColor)
-                            .frame(width: 17, height: 17)
-                            .overlay {
-                                Circle()
-                                    .strokeBorder(
-                                        vm.readerTheme == theme ? Color.accentColor : Color.secondary.opacity(0.4),
-                                        lineWidth: vm.readerTheme == theme ? 2.5 : 1
-                                    )
-                            }
+                StudioSegmentedTabs(selection: $vm.mangaFitMode, items: MangaFitMode.allCases)
+                    .frame(width: 220)
+            } else {
+                // Page turn mode segmented control (仿真翻页 / 平移翻页 / 上下滚动)
+                StudioSegmentedTabs(selection: $vm.readerPageMode, items: ReaderPageMode.allCases)
+                    .frame(width: 224)
+
+                // TTS Speech button
+                StudioCircleButton(
+                    systemImage: vm.isSpeakingChapter ? "stop.circle.fill" : "speaker.wave.2",
+                    variant: vm.isSpeakingChapter ? .primary : .secondary,
+                    size: .small,
+                    isDisabled: vm.previewChapter == nil,
+                    accessibilityLabel: vm.isSpeakingChapter ? "停止语音朗读" : "开始本地语音听书"
+                ) {
+                    vm.toggleSpeechForCurrentChapter()
+                }
+                .help(vm.isSpeakingChapter ? "停止语音朗读" : "开始本地语音听书")
+
+                // Bookmark current page button
+                if let chap = vm.previewChapter?.chapter {
+                    let curPage = paginatedPages.indices.contains(currentPageIndex) ? paginatedPages[currentPageIndex] : nil
+                    let isMarked = vm.isReaderPageBookmarked(chapterId: chap.id, pageIndex: curPage?.id ?? 0)
+                    StudioCircleButton(
+                        systemImage: isMarked ? "bookmark.fill" : "bookmark",
+                        variant: isMarked ? .primary : .secondary,
+                        size: .small,
+                        accessibilityLabel: "添加/移除页内书签"
+                    ) {
+                        vm.toggleReaderBookmark(
+                            chapter: chap,
+                            pageIndex: curPage?.id ?? 0,
+                            progressRatio: curPage?.progressRatio ?? 0,
+                            excerpt: curPage?.excerpt ?? chap.title
+                        )
                     }
-                    .buttonStyle(.plain)
-                    .help(theme.rawValue)
+                    .help("添加/移除页内书签")
                 }
-            }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
-            .background(StudioTokens.controlBackground, in: Capsule())
-            .overlay(Capsule().strokeBorder(StudioTokens.hairlineStroke, lineWidth: 1))
 
-            StudioPillButton(title: "Aa", systemImage: "textformat", size: .small) {
-                showTypographyPopover.toggle()
-            }
-            .popover(isPresented: $showTypographyPopover, arrowEdge: .bottom) {
-                typographySettingsPopover
+                // Compact color-swatch theme selector
+                HStack(spacing: 6) {
+                    ForEach(ReaderTheme.allCases) { theme in
+                        Button {
+                            vm.readerTheme = theme
+                        } label: {
+                            Circle()
+                                .fill(theme.swatchColor)
+                                .frame(width: 17, height: 17)
+                                .overlay {
+                                    Circle()
+                                        .strokeBorder(
+                                            vm.readerTheme == theme ? Color.accentColor : Color.secondary.opacity(0.4),
+                                            lineWidth: vm.readerTheme == theme ? 2.5 : 1
+                                        )
+                                }
+                        }
+                        .buttonStyle(.plain)
+                        .help(theme.rawValue)
+                    }
+                }
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(StudioTokens.controlBackground, in: Capsule())
+                .overlay(Capsule().strokeBorder(StudioTokens.hairlineStroke, lineWidth: 1))
+
+                StudioPillButton(title: "Aa", systemImage: "textformat", size: .small) {
+                    showTypographyPopover.toggle()
+                }
+                .popover(isPresented: $showTypographyPopover, arrowEdge: .bottom) {
+                    typographySettingsPopover
+                }
             }
 
             StudioCircleButton(
