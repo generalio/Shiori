@@ -63,6 +63,9 @@ final class CoverThumbnailCache {
 
         let resolvedSourceId: String = {
             if !sourceId.isEmpty { return sourceId }
+            if trimmed.hasPrefix("file://") || trimmed.hasPrefix("local-epub://") {
+                return LocalLibraryPlugin.sourceId
+            }
             if trimmed.contains("linovelib") || trimmed.contains("readpai") || trimmed.contains("bilinovel") {
                 return "bilinovel"
             }

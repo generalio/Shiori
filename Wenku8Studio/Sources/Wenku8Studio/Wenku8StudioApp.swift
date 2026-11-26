@@ -45,6 +45,17 @@ struct Wenku8StudioApp: App {
                 }
                 .keyboardShortcut(",", modifiers: .command)
             }
+            CommandGroup(after: .newItem) {
+                Button("导入本地书籍（EPUB / PDF）…") {
+                    viewModel.presentLocalBookImportPanel()
+                }
+                .keyboardShortcut("o", modifiers: .command)
+
+                Button("从 Apple Books 导入…") {
+                    viewModel.openAppleBooksImportSheet()
+                }
+                .keyboardShortcut("o", modifiers: [.command, .shift])
+            }
         }
     }
 }

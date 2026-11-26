@@ -57,7 +57,7 @@ struct DiscoveryView: View {
     }
 
     private var discoveryHeader: some View {
-        let enabledPlugins = vm.sourceRegistry.enabledPlugins(matching: vm.selectedContentKindFilter)
+        let enabledPlugins = vm.sourceRegistry.enabledOnlinePlugins(matching: vm.selectedContentKindFilter)
         let channels = vm.activeDiscoveryChannels()
         return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {

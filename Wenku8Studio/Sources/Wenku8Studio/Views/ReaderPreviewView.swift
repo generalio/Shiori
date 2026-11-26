@@ -34,6 +34,16 @@ struct ReaderPreviewView: View {
     }
 
     var body: some View {
+        Group {
+            if let pdfRecord = vm.activePDFRecord {
+                PDFReaderView(record: pdfRecord, initialPageIndex: vm.activePDFInitialPage)
+            } else {
+                standardReaderBody
+            }
+        }
+    }
+
+    private var standardReaderBody: some View {
         HStack(spacing: 0) {
             if showTOCSidebar && !vm.isFocusReadingMode {
                 leftSidebarDrawer

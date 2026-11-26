@@ -35,6 +35,10 @@ struct ContentView: View {
             WebLoginSheet()
                 .environmentObject(vm)
         }
+        .sheet(isPresented: $vm.showAppleBooksImportSheet) {
+            AppleBooksImportSheet()
+                .environmentObject(vm)
+        }
         .preferredColorScheme(vm.appColorScheme.colorScheme)
         .tint(vm.appAccentTheme == .system ? nil : vm.appAccentTheme.color)
         .environment(\.studioAccentColor, vm.appAccentTheme.color)
@@ -79,8 +83,8 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Shiori")
                         .font(.headline.weight(.bold))
-                    let activeCount = vm.sourceRegistry.enabledPlugins().count
-                    Text(activeCount > 0 ? "栞 · \(activeCount) 个已启用书源" : "栞 · 多源阅读工坊")
+                    let activeCount = vm.sourceRegistry.enabledOnlinePlugins().count
+                    Text(activeCount > 0 ? "栞 · \(activeCount) 个在线书源 + 本地书库" : "栞 · 多源与本地阅读工坊")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -248,7 +252,7 @@ struct ContentView: View {
     }
 
     private var accountPillButton: some View {
-        let enabledPlugins = vm.sourceRegistry.enabledPlugins()
+        let enabledPlugins = vm.sourceRegistry.enabledOnlinePlugins()
         let verifiedCount = enabledPlugins.filter { plugin in
             vm.sourceAuthState(for: plugin.descriptor.id).isVerified
         }.count
@@ -315,7 +319,7 @@ struct ContentView: View {
 
             Divider()
 
-            ForEach(vm.sourceRegistry.allPlugins(), id: \.descriptor.id) { plugin in
+            ForEach(vm.sourceRegistry.allOnlinePlugins(), id: \.descriptor.id) { plugin in
                 let sid = plugin.descriptor.id
                 let enabled = vm.sourceRegistry.isEnabled(sid)
                 let auth = vm.sourceAuthState(for: sid)
@@ -425,6 +429,19 @@ struct ContentView: View {
                 .studioCard(cornerRadius: 12, padding: 10)
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
+            if let progress = vm.localImportProgressText, vm.isImportingLocalBooks, !vm.showAppleBooksImportSheet {
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(progress)
+                        .font(.callout)
+                        .lineLimit(1)
+                    Spacer()
+                }
+                .studioCard(cornerRadius: 12, padding: 10, tint: .indigo)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
             if let err = vm.errorBanner {
                 HStack(spacing: 10) {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -433,8 +450,33 @@ struct ContentView: View {
                         .font(.callout)
                         .lineLimit(2)
                     Spacer()
+                    if let missingId = vm.missingLocalBookId {
+                        if vm.missingLocalBookNeedsICloud {
+                            StudioPillButton(
+                                title: "从 iCloud 下载",
+                                systemImage: "icloud.and.arrow.down",
+                                variant: .primary,
+                                size: .small,
+                                isLoading: vm.isImportingLocalBooks
+                            ) {
+                                vm.downloadICloudLocalBookAndReload(bookId: missingId)
+                            }
+                        } else {
+                            StudioPillButton(
+                                title: "重新定位文件…",
+                                systemImage: "folder.badge.questionmark",
+                                variant: .primary,
+                                size: .small
+                            ) {
+                                vm.relinkLocalBook(bookId: missingId)
+                            }
+                        }
+                    }
                     StudioPillButton(title: "关闭", variant: .subtle, size: .small) {
                         vm.errorBanner = nil
+                        vm.missingLocalBookId = nil
+                        vm.missingLocalBookPath = nil
+                        vm.missingLocalBookNeedsICloud = false
                     }
                 }
                 .studioCard(cornerRadius: 12, padding: 10, tint: .orange)

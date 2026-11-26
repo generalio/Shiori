@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import Wenku8Core
 
 struct BookshelfHistoryView: View {
@@ -7,6 +8,7 @@ struct BookshelfHistoryView: View {
     @State private var filterText: String = ""
     @State private var selectedSourceFilter: String? = nil
     @State private var selectedMediaFilter: ContentKind? = nil
+    @State private var isDropTargeted: Bool = false
 
     enum ShelfScope: String, CaseIterable, Identifiable {
         case all = "全部"
@@ -39,21 +41,97 @@ struct BookshelfHistoryView: View {
                 vm.syncBookshelfBidirectionally(silent: true)
             }
         }
+        .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
+            handleDroppedProviders(providers)
+        }
+        .overlay {
+            if isDropTargeted {
+                ZStack {
+                    Color.accentColor.opacity(0.08)
+                    VStack(spacing: 10) {
+                        Image(systemName: "square.and.arrow.down.on.square.fill")
+                            .font(.system(size: 38))
+                            .foregroundStyle(Color.accentColor)
+                        Text("松开鼠标导入本地 EPUB / PDF 到书架")
+                            .font(.headline)
+                        Text("引用原文件路径，不重复占用磁盘空间")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(28)
+                    .studioCard(cornerRadius: 18, padding: 12, tint: .accentColor)
+                }
+                .allowsHitTesting(false)
+            }
+        }
+    }
+
+    private func handleDroppedProviders(_ providers: [NSItemProvider]) -> Bool {
+        let fileProviders = providers.filter { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }
+        guard !fileProviders.isEmpty else { return false }
+
+        let group = DispatchGroup()
+        var urls: [URL] = []
+        let lock = NSLock()
+
+        for provider in fileProviders {
+            group.enter()
+            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+                defer { group.leave() }
+                if let data = item as? Data, let url = URL(dataRepresentation: data, relativeTo: nil) {
+                    lock.lock()
+                    urls.append(url)
+                    lock.unlock()
+                } else if let url = item as? URL {
+                    lock.lock()
+                    urls.append(url)
+                    lock.unlock()
+                }
+            }
+        }
+
+        group.notify(queue: .main) {
+            if !urls.isEmpty {
+                vm.importLocalBookURLs(urls, origin: .localFile)
+            }
+        }
+        return true
     }
 
     private var headerBar: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             StudioSegmentedTabs(selection: $filterScope, items: ShelfScope.allCases)
-                .frame(maxWidth: 300)
+                .frame(maxWidth: 260)
 
             StudioSearchField(
                 icon: "line.3.horizontal.decrease.circle",
                 placeholder: "筛选书名或作者...",
                 text: $filterText
             )
-            .frame(maxWidth: 240)
+            .frame(maxWidth: 210)
 
             Spacer()
+
+            StudioPillButton(
+                title: "导入书籍",
+                systemImage: "square.and.arrow.down",
+                variant: .primary,
+                size: .small,
+                isLoading: vm.isImportingLocalBooks
+            ) {
+                vm.presentLocalBookImportPanel()
+            }
+            .help("导入本地 EPUB / PDF 文件或文件夹（⌘O，仅保存路径引用）")
+
+            StudioPillButton(
+                title: "Apple Books",
+                systemImage: "books.vertical",
+                variant: .secondary,
+                size: .small
+            ) {
+                vm.openAppleBooksImportSheet()
+            }
+            .help("扫描并按需导入 Apple Books（iCloud 图书）中的无 DRM 书籍（⇧⌘O）")
 
             StudioPillButton(
                 title: "云书架同步",
@@ -233,7 +311,9 @@ struct BookshelfHistoryView: View {
                             showSyncBadge: true,
                             showSummary: vm.showCardSummary,
                             isCompact: vm.compactBookCards,
-                            deleteTooltip: (entry.sourceId == "wenku8" && vm.isCloudSessionAvailable) ? "移出书架（同步从云端删除）" : "移出本地书架",
+                            deleteTooltip: entry.sourceId == LocalLibraryPlugin.sourceId
+                                ? "移出本地书库（仅移除引用，不删除原文件）"
+                                : ((entry.sourceId == "wenku8" && vm.isCloudSessionAvailable) ? "移出书架（同步从云端删除）" : "移出本地书架"),
                             onOpen: {
                                 vm.loadBook(inputOverride: entry.id, sourceIdOverride: entry.sourceId)
                             },

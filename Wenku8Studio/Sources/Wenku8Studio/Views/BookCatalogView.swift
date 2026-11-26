@@ -182,46 +182,66 @@ struct BookCatalogView: View {
                 }
 
                 ScrollView(.horizontal, showsIndicators: false) {
+                    let isLocal = book.sourceId == LocalLibraryPlugin.sourceId
                     HStack(spacing: 8) {
                         StudioFilterChip(title: "开始阅读", systemImage: "book.pages", isSelected: true) {
-                            vm.openLastReadOrFirstChapter()
-                        }
-
-                        if vm.currentBookSupportsReviews {
-                            StudioFilterChip(
-                                title: vm.showReviewsInspector ? "收起评论" : "展开评论",
-                                systemImage: vm.showReviewsInspector ? "bubble.left.and.bubble.right.fill" : "bubble.left.and.bubble.right",
-                                isSelected: vm.showReviewsInspector
-                            ) {
-                                vm.toggleReviewsInspectorForCurrentBook()
+                            if isLocal {
+                                vm.openLocalBookInReader(book)
+                            } else {
+                                vm.openLastReadOrFirstChapter()
                             }
                         }
 
-                        if vm.currentBookSupportsCloudActions {
-                            StudioFilterChip(
-                                title: vm.isVotingBook ? "投票中..." : "推一下",
-                                systemImage: "hand.thumbsup",
-                                isSelected: false
-                            ) {
-                                vm.voteCurrentBook()
+                        if isLocal {
+                            if AppleBooksBridge.isAppleBooksInstalled {
+                                StudioFilterChip(title: "发送到 Apple Books", systemImage: "books.vertical", isSelected: false) {
+                                    vm.sendFileToAppleBooks(book.catalogURL)
+                                }
                             }
-                            .disabled(vm.isVotingBook)
-                            .help("为本书投推荐票（每日可用账号推荐次数）")
-                        }
+                            StudioFilterChip(title: "在 Finder 中显示", systemImage: "folder", isSelected: false) {
+                                vm.revealInFinder(book.catalogURL)
+                            }
+                            StudioFilterChip(title: "重新定位文件…", systemImage: "folder.badge.questionmark", isSelected: false) {
+                                vm.relinkLocalBook(bookId: book.bookId)
+                            }
+                        } else {
+                            if vm.currentBookSupportsReviews {
+                                StudioFilterChip(
+                                    title: vm.showReviewsInspector ? "收起评论" : "展开评论",
+                                    systemImage: vm.showReviewsInspector ? "bubble.left.and.bubble.right.fill" : "bubble.left.and.bubble.right",
+                                    isSelected: vm.showReviewsInspector
+                                ) {
+                                    vm.toggleReviewsInspectorForCurrentBook()
+                                }
+                            }
 
-                        StudioFilterChip(title: "同作者作品", systemImage: "person.2", isSelected: false) {
-                            vm.loadAuthorWorks(author: book.author, sourceId: book.sourceId)
-                        }
+                            if vm.currentBookSupportsCloudActions {
+                                StudioFilterChip(
+                                    title: vm.isVotingBook ? "投票中..." : "推一下",
+                                    systemImage: "hand.thumbsup",
+                                    isSelected: false
+                                ) {
+                                    vm.voteCurrentBook()
+                                }
+                                .disabled(vm.isVotingBook)
+                                .help("为本书投推荐票（每日可用账号推荐次数）")
+                            }
 
-                        StudioFilterChip(title: "拼装设置", systemImage: "slider.horizontal.3", isSelected: false) {
-                            vm.scrollToAssemblyToken = UUID()
-                            vm.navigateToSettingsCategory(.assembly)
+                            StudioFilterChip(title: "同作者作品", systemImage: "person.2", isSelected: false) {
+                                vm.loadAuthorWorks(author: book.author, sourceId: book.sourceId)
+                            }
+
+                            StudioFilterChip(title: "拼装设置", systemImage: "slider.horizontal.3", isSelected: false) {
+                                vm.scrollToAssemblyToken = UUID()
+                                vm.navigateToSettingsCategory(.assembly)
+                            }
                         }
 
                         Spacer(minLength: 12)
-                        Text("来源：\(book.baseURL.replacingOccurrences(of: "https://", with: ""))")
+                        Text(isLocal ? "引用路径：\(book.catalogURL)" : "来源：\(book.baseURL.replacingOccurrences(of: "https://", with: ""))")
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
+                            .lineLimit(1)
                     }
                 }
             }
@@ -256,7 +276,28 @@ struct BookCatalogView: View {
         }
     }
 
+    @ViewBuilder
     private func catalogControlsBar(_ book: BookDetail) -> some View {
+        if book.sourceId == LocalLibraryPlugin.sourceId {
+            HStack(spacing: 10) {
+                StudioSearchField(
+                    icon: "magnifyingglass",
+                    placeholder: "按目录项名称过滤...",
+                    text: $vm.chapterSearchQuery
+                )
+                .frame(maxWidth: 280)
+                Spacer()
+                Text("本地引用模式 · 点击任意目录项即可在内置阅读器打开")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .studioCard(cornerRadius: StudioTokens.cardRadius, padding: 12)
+        } else {
+            onlineCatalogControlsBar(book)
+        }
+    }
+
+    private func onlineCatalogControlsBar(_ book: BookDetail) -> some View {
         let isManga = book.contentKind == .manga
         let quickActionButtons = HStack(spacing: 8) {
             StudioPillButton(
@@ -401,7 +442,49 @@ struct BookCatalogView: View {
         return vol.chapters.filter { $0.title.lowercased().contains(q) }
     }
 
+    @ViewBuilder
     private func bottomActionBar(_ book: BookDetail) -> some View {
+        if book.sourceId == LocalLibraryPlugin.sourceId {
+            let localRec = vm.localRecord(for: book.bookId)
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(localRec?.origin.displayLabel ?? "本地书库")
+                        .font(.callout.weight(.medium))
+                    Text(book.catalogURL)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+
+                Spacer()
+
+                StudioPillButton(title: "在 Finder 中显示", systemImage: "folder", size: .regular) {
+                    vm.revealInFinder(book.catalogURL)
+                }
+
+                if AppleBooksBridge.isAppleBooksInstalled {
+                    StudioPillButton(title: "发送到 Apple Books", systemImage: "books.vertical", size: .regular) {
+                        vm.sendFileToAppleBooks(book.catalogURL)
+                    }
+                }
+
+                StudioPillButton(
+                    title: localRec?.format == .pdf ? "打开 PDF 阅读器" : "开始阅读",
+                    systemImage: "book.pages.fill",
+                    variant: .primary,
+                    size: .large
+                ) {
+                    vm.openLocalBookInReader(book)
+                }
+            }
+            .studioCard(cornerRadius: StudioTokens.cardRadiusLarge, padding: 14)
+        } else {
+            onlineBottomActionBar(book)
+        }
+    }
+
+    private func onlineBottomActionBar(_ book: BookDetail) -> some View {
         let isManga = book.contentKind == .manga
         return HStack(spacing: 14) {
             VStack(alignment: .leading, spacing: 2) {

@@ -812,6 +812,7 @@ struct StudioSourceBadge: View {
         switch sourceId {
         case "bilinovel": return Color.pink
         case "copymanga": return Color.teal
+        case "local": return Color.indigo
         default: return studioAccent
         }
     }

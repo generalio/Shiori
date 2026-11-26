@@ -36,6 +36,7 @@ public struct BookSourceDescriptor: Identifiable, Hashable, Sendable {
     public let supportedSearchScopes: [SearchScope]
     public let requiresBrowserRuntime: Bool
     public let contentKind: ContentKind
+    public let isLocalSource: Bool
 
     public init(
         id: String,
@@ -45,7 +46,8 @@ public struct BookSourceDescriptor: Identifiable, Hashable, Sendable {
         defaultMirrors: [String],
         supportedSearchScopes: [SearchScope],
         requiresBrowserRuntime: Bool = false,
-        contentKind: ContentKind = .lightNovel
+        contentKind: ContentKind = .lightNovel,
+        isLocalSource: Bool = false
     ) {
         self.id = id
         self.displayName = displayName
@@ -55,6 +57,7 @@ public struct BookSourceDescriptor: Identifiable, Hashable, Sendable {
         self.supportedSearchScopes = supportedSearchScopes
         self.requiresBrowserRuntime = requiresBrowserRuntime
         self.contentKind = contentKind
+        self.isLocalSource = isLocalSource
     }
 }
 

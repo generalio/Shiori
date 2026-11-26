@@ -18,6 +18,8 @@ targets:
     platform: macOS
     sources:
       - path: Sources/Wenku8Core
+    dependencies:
+      - sdk: PDFKit.framework
     settings:
       base:
         PRODUCT_NAME: Wenku8Core
@@ -33,6 +35,7 @@ targets:
     dependencies:
       - target: Wenku8Core
       - sdk: WebKit.framework
+      - sdk: PDFKit.framework
     info:
       path: AppResources/Info.plist
       properties:
@@ -41,8 +44,8 @@ targets:
         CFBundleName: Shiori
         CFBundleIconFile: AppIcon
         CFBundleIconName: AppIcon
-        CFBundleShortVersionString: "2.7.0"
-        CFBundleVersion: "7"
+        CFBundleShortVersionString: "2.8.0"
+        CFBundleVersion: "8"
         LSMinimumSystemVersion: "$(MACOSX_DEPLOYMENT_TARGET)"
         NSHighResolutionCapable: true
         NSAppTransportSecurity:

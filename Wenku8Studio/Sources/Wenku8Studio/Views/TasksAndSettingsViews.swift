@@ -84,6 +84,13 @@ struct TasksAndLogsView: View {
                             StudioPillButton(title: "用默认阅读器打开", systemImage: "book", variant: .primary, size: .small) {
                                 vm.openFileWithDefaultReader(item.filePath)
                             }
+                            let ext = URL(fileURLWithPath: item.filePath).pathExtension.lowercased()
+                            if AppleBooksBridge.isAppleBooksInstalled && (ext == "epub" || ext == "pdf") {
+                                StudioPillButton(title: "发送到 Apple Books", systemImage: "books.vertical", size: .small) {
+                                    vm.sendFileToAppleBooks(item.filePath)
+                                }
+                                .help("单独将该文件发送到苹果官方「图书」App（不自动同步）")
+                            }
                         }
                     }
                     .padding(.vertical, 4)

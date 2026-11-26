@@ -22,7 +22,7 @@ struct SettingsAndAssemblyView: View {
     }
 
     private var sourceCategories: [SettingsCategory] {
-        vm.sourceRegistry.allPlugins().map { .source($0.descriptor.id) }
+        vm.sourceRegistry.allOnlinePlugins().map { .source($0.descriptor.id) }
     }
 
     private func matchesSearch(_ category: SettingsCategory) -> Bool {

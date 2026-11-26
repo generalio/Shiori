@@ -2,6 +2,7 @@ import AppKit
 import AVFoundation
 import Foundation
 import SwiftUI
+import UniformTypeIdentifiers
 import WebKit
 import Wenku8Core
 
@@ -306,6 +307,7 @@ private struct PersistedAppState: Codable, Sendable {
     var sourceConfigs: [String: SourceRuntimeConfig]?
     var selectedDiscoverySourceFilter: String?
     var activeDiscoverySourceId: String?
+    var lastReadPDFPageByBook: [String: Int]?
 }
 
 public struct NavigationSnapshot: Equatable, Sendable {
@@ -481,6 +483,20 @@ public final class StudioViewModel: ObservableObject {
     @Published public var politeDelaySeconds: Double = 0.25
     @Published public var outputDirectoryPath: String
 
+    // Local Library & Apple Books Integration
+    @Published public var localBookRecords: [String: LocalBookRecord] = [:]
+    @Published public var showAppleBooksImportSheet: Bool = false
+    @Published public var appleBooksCandidates: [AppleBooksCandidate] = []
+    @Published public var isScanningAppleBooks: Bool = false
+    @Published public var isImportingLocalBooks: Bool = false
+    @Published public var localImportProgressText: String? = nil
+    @Published public var missingLocalBookId: String? = nil
+    @Published public var missingLocalBookPath: String? = nil
+    @Published public var missingLocalBookNeedsICloud: Bool = false
+    @Published public var activePDFRecord: LocalBookRecord? = nil
+    @Published public var activePDFInitialPage: Int = 0
+    @Published public var lastReadPDFPageByBook: [String: Int] = [:]
+
     private enum DiscoverySource {
         case list(sourceId: String, title: String, path: String)
         case search(query: String, scope: SearchScope, sourceFilter: String?)
@@ -493,6 +509,7 @@ public final class StudioViewModel: ObservableObject {
     private let client: Wenku8Client
     private let bilinovelPlugin: BilinovelPlugin
     private let copymangaPlugin: CopymangaPlugin
+    public let localLibraryPlugin: LocalLibraryPlugin
     private let webKitFetchService = WebKitFetchService()
     private let epubBuilder = EPUBBuilder()
     private let persistenceQueue = DispatchQueue(label: "com.lightnovel.Shiori.persistence", qos: .utility)
@@ -511,13 +528,16 @@ public final class StudioViewModel: ObservableObject {
         let wClient = Wenku8Client(baseURL: "https://www.wenku8.cc", cookie: "", timeout: 15, politeDelaySeconds: 0.25)
         let bPlugin = BilinovelPlugin(baseURL: "https://www.linovelib.com", cookie: "", timeout: 18, politeDelaySeconds: 1.5)
         let cPlugin = CopymangaPlugin(baseURL: "https://mapi.hotmangasd.com", timeout: 18, politeDelaySeconds: 0.4)
+        let lPlugin = LocalLibraryPlugin()
         self.client = wClient
         self.bilinovelPlugin = bPlugin
         self.copymangaPlugin = cPlugin
+        self.localLibraryPlugin = lPlugin
         self.sourceRegistry = SourceRegistry.makeDefaultRegistry(
             wenku8Client: wClient,
             bilinovelPlugin: bPlugin,
-            copymangaPlugin: cPlugin
+            copymangaPlugin: cPlugin,
+            localLibraryPlugin: lPlugin
         )
         self.searchEngine = AggregatedSearchEngine(registry: self.sourceRegistry)
         self.sourceConfigs = Self.defaultSourceConfigs()
@@ -537,6 +557,7 @@ public final class StudioViewModel: ObservableObject {
             }
         }
         Task {
+            await refreshLocalLibrarySnapshot(reconcileShelf: true)
             await sourceRegistry.setBrowserRuntime(webKitFetchService)
             await syncClientSettings()
             if !customCookie.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -619,11 +640,11 @@ public final class StudioViewModel: ObservableObject {
     }
 
     public var appVersionDisplay: String {
-        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "2.7.0"
+        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "2.8.0"
     }
 
     public var buildNumberDisplay: String {
-        (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? "7"
+        (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? "8"
     }
 
     public func navigateToSettingsCategory(_ category: SettingsCategory) {
@@ -1212,6 +1233,9 @@ public final class StudioViewModel: ObservableObject {
         bookInput = query
         errorBanner = nil
         statusBanner = nil
+        missingLocalBookId = nil
+        missingLocalBookPath = nil
+        missingLocalBookNeedsICloud = false
 
         let scopedKey = ScopedBookID(sourceId: targetSourceId, bookId: targetBookId).rawKey
         if let cached = bookDetailCache[scopedKey] {
@@ -1278,6 +1302,20 @@ public final class StudioViewModel: ObservableObject {
                 self.errorBanner = msg
                 self.activeLoginSourceId = sourceId
                 self.appendLog("访问受限（\(sourceId)）：\(msg)")
+            } catch let LocalLibraryError.fileMissing(bookId, filePath) {
+                let resolvedId = bookId.isEmpty ? targetBookId : bookId
+                self.missingLocalBookId = resolvedId
+                self.missingLocalBookPath = filePath
+                self.missingLocalBookNeedsICloud = false
+                self.errorBanner = "本地文件已移动或缺失：\(URL(fileURLWithPath: filePath).lastPathComponent)"
+                self.appendLog("本地文件缺失（\(resolvedId)）：\(filePath)")
+            } catch let LocalLibraryError.iCloudDownloadRequired(bookId, filePath) {
+                let resolvedId = bookId.isEmpty ? targetBookId : bookId
+                self.missingLocalBookId = resolvedId
+                self.missingLocalBookPath = filePath
+                self.missingLocalBookNeedsICloud = true
+                self.errorBanner = "该书籍目前仅在 iCloud 云端，尚未下载到本机：\(URL(fileURLWithPath: filePath).lastPathComponent)"
+                self.appendLog("需要从 iCloud 下载（\(resolvedId)）：\(filePath)")
             } catch {
                 self.errorBanner = error.localizedDescription
                 self.appendLog("拉取失败：\(error.localizedDescription)")
@@ -1388,6 +1426,39 @@ public final class StudioViewModel: ObservableObject {
         selectedSection = .reader
         errorBanner = nil
         readerStartAtEndOnOpen = startAtLastPage
+
+        if chapter.url.hasPrefix("local-pdf://"),
+           let parsed = LocalPDFParser.parseLocalPDFURL(chapter.url) {
+            if let rec = localBookRecords[parsed.bookId] {
+                let availability = AppleBooksBridge.fileAvailability(at: rec.fileURL)
+                switch availability {
+                case .available:
+                    activePDFRecord = rec
+                    activePDFInitialPage = parsed.pageIndex
+                    previewChapter = ChapterContent(chapter: chapter, tokens: [], imageURLs: [], contentKind: .lightNovel)
+                    isLoadingPreview = false
+                    if let detail = bookDetail {
+                        lastReadChapterByBook[detail.scopedId] = chapter.id
+                    }
+                    lastReadPDFPageByBook[rec.id] = parsed.pageIndex
+                    savePersistedState()
+                    return
+                case .iCloudNotDownloaded:
+                    missingLocalBookId = rec.id
+                    missingLocalBookPath = rec.filePath
+                    missingLocalBookNeedsICloud = true
+                    errorBanner = "该 PDF 目前在 iCloud 云端，请点击「从 iCloud 下载」后再阅读。"
+                    return
+                case .missing:
+                    missingLocalBookId = rec.id
+                    missingLocalBookPath = rec.filePath
+                    missingLocalBookNeedsICloud = false
+                    errorBanner = "找不到原 PDF 文件：\(URL(fileURLWithPath: rec.filePath).lastPathComponent)"
+                    return
+                }
+            }
+        }
+        activePDFRecord = nil
 
         let bookSourceId = bookDetail?.sourceId ?? chapter.sourceId
         let cacheKey = "\(bookSourceId):\(bookDetail?.bookId ?? ""):\(chapter.id)"
@@ -2183,6 +2254,24 @@ public final class StudioViewModel: ObservableObject {
     public func removeBookmark(id: String, sourceId: String = "wenku8") {
         let existing = bookmarks.first(where: { $0.id == id && $0.sourceId == sourceId })
         bookmarks.removeAll { $0.id == id && $0.sourceId == sourceId }
+
+        if sourceId == LocalLibraryPlugin.sourceId {
+            localBookRecords.removeValue(forKey: id)
+            bookDetailCache.removeValue(forKey: ScopedBookID(sourceId: sourceId, bookId: id).rawKey)
+            if activePDFRecord?.id == id {
+                activePDFRecord = nil
+            }
+            if missingLocalBookId == id {
+                missingLocalBookId = nil
+                missingLocalBookPath = nil
+                missingLocalBookNeedsICloud = false
+            }
+            Task { [weak self] in
+                await self?.localLibraryPlugin.store.removeBook(id: id)
+            }
+            savePersistedState()
+            return
+        }
 
         let supportsCloud = (sourceRegistry.plugin(for: sourceId) as? any CloudBookshelfCapableSource) != nil
         guard supportsCloud else {
@@ -3009,7 +3098,8 @@ public final class StudioViewModel: ObservableObject {
             showAdvancedSettings: showAdvancedSettings,
             sourceConfigs: sourceConfigs,
             selectedDiscoverySourceFilter: selectedDiscoverySourceFilter,
-            activeDiscoverySourceId: activeDiscoverySourceId
+            activeDiscoverySourceId: activeDiscoverySourceId,
+            lastReadPDFPageByBook: lastReadPDFPageByBook
         )
         persistenceQueue.async {
             if let data = try? JSONEncoder().encode(state) {
@@ -3086,7 +3176,254 @@ public final class StudioViewModel: ObservableObject {
         if let activeSrc = state.activeDiscoverySourceId, !activeSrc.isEmpty {
             activeDiscoverySourceId = activeSrc
         }
+        if let pdfPages = state.lastReadPDFPageByBook {
+            lastReadPDFPageByBook = pdfPages
+        }
         ensureDefaultSourceConfigsPopulated()
+    }
+
+    // MARK: - Local Library & Apple Books Integration
+
+    public func refreshLocalLibrarySnapshot(reconcileShelf: Bool = false) async {
+        let records = await localLibraryPlugin.store.allRecords()
+        var map: [String: LocalBookRecord] = [:]
+        for rec in records {
+            map[rec.id] = rec
+        }
+        self.localBookRecords = map
+
+        if reconcileShelf && !records.isEmpty {
+            var changed = false
+            for rec in records.reversed() {
+                if !bookmarks.contains(where: { $0.id == rec.id && $0.sourceId == LocalLibraryPlugin.sourceId }) {
+                    bookmarks.insert(rec.toBookmarkEntry(), at: 0)
+                    changed = true
+                }
+            }
+            if changed {
+                savePersistedState()
+            }
+        }
+    }
+
+    public func localRecord(for bookId: String) -> LocalBookRecord? {
+        localBookRecords[bookId]
+    }
+
+    public func presentLocalBookImportPanel() {
+        let panel = NSOpenPanel()
+        panel.title = "导入本地书籍（EPUB / PDF）"
+        panel.message = "仅保存原文件路径引用，不会重复复制书籍文件；支持多选文件或文件夹。"
+        panel.prompt = "导入到书架"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = true
+        var allowed: [UTType] = [.pdf, .folder]
+        if let epubType = UTType(filenameExtension: "epub") {
+            allowed.insert(epubType, at: 0)
+        }
+        panel.allowedContentTypes = allowed
+
+        if panel.runModal() == .OK, !panel.urls.isEmpty {
+            importLocalBookURLs(panel.urls, origin: .localFile)
+        }
+    }
+
+    public func importLocalBookURLs(_ urls: [URL], origin: LocalBookOrigin = .localFile) {
+        guard !urls.isEmpty else { return }
+        isImportingLocalBooks = true
+        localImportProgressText = "正在扫描待导入书籍…"
+        errorBanner = nil
+
+        Task { [weak self] in
+            guard let self else { return }
+            let summary = await self.localLibraryPlugin.store.importBooks(
+                urls: urls,
+                origin: origin,
+                downloadICloudIfNeeded: true
+            ) { [weak self] msg in
+                Task { @MainActor in
+                    self?.localImportProgressText = msg
+                }
+            }
+
+            await self.refreshLocalLibrarySnapshot(reconcileShelf: false)
+
+            for rec in summary.imported.reversed() {
+                let entry = rec.toBookmarkEntry()
+                self.bookmarks.removeAll { $0.id == rec.id && $0.sourceId == LocalLibraryPlugin.sourceId }
+                self.bookmarks.insert(entry, at: 0)
+            }
+            if !summary.imported.isEmpty {
+                self.savePersistedState()
+            }
+
+            self.isImportingLocalBooks = false
+            self.localImportProgressText = nil
+
+            var parts: [String] = []
+            if !summary.imported.isEmpty {
+                parts.append("成功导入 \(summary.imported.count) 本（引用模式）")
+            }
+            if summary.skippedDuplicates > 0 {
+                parts.append("跳过 \(summary.skippedDuplicates) 本已存在")
+            }
+            if !summary.failed.isEmpty {
+                parts.append("\(summary.failed.count) 本失败")
+            }
+
+            if !summary.imported.isEmpty || summary.skippedDuplicates > 0 {
+                self.statusBanner = parts.joined(separator: " · ")
+                self.appendLog("本地导入完成：\(parts.joined(separator: "，"))")
+            }
+            if let firstErr = summary.failed.first {
+                self.errorBanner = "部分书籍导入失败：\(firstErr.reason)"
+                for f in summary.failed {
+                    self.appendLog("本地导入失败（\(f.path)）：\(f.reason)")
+                }
+            } else if summary.imported.isEmpty && summary.skippedDuplicates == 0 {
+                self.errorBanner = "未在所选路径中找到可导入的 EPUB 或 PDF 文件"
+            }
+
+            if self.showAppleBooksImportSheet {
+                await self.refreshAppleBooksCandidates()
+            }
+        }
+    }
+
+    public func openAppleBooksImportSheet() {
+        showAppleBooksImportSheet = true
+        Task { [weak self] in
+            await self?.refreshAppleBooksCandidates()
+        }
+    }
+
+    public func refreshAppleBooksCandidates() async {
+        isScanningAppleBooks = true
+        let importedPaths = await localLibraryPlugin.store.importedCanonicalPaths()
+        let scanned = await Task.detached(priority: .userInitiated) {
+            AppleBooksBridge.scanICloudBooks(importedCanonicalPaths: importedPaths)
+        }.value
+        self.appleBooksCandidates = scanned
+        self.isScanningAppleBooks = false
+    }
+
+    public func importAppleBooksCandidates(_ candidates: [AppleBooksCandidate]) {
+        let urls = candidates.map(\.fileURL)
+        importLocalBookURLs(urls, origin: .appleBooksICloud)
+    }
+
+    /// Independent Direction B: sends a local file or exported artifact to Apple Books.
+    public func sendFileToAppleBooks(_ filePath: String) {
+        let url = URL(fileURLWithPath: filePath)
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await AppleBooksBridge.sendToAppleBooks(fileURL: url)
+                self.statusBanner = "已发送到 Apple Books：\(url.lastPathComponent)"
+                self.appendLog("已发送到 Apple Books：\(filePath)")
+            } catch {
+                self.errorBanner = error.localizedDescription
+                self.appendLog("发送到 Apple Books 失败：\(error.localizedDescription)")
+            }
+        }
+    }
+
+    public func openLocalBookInReader(_ book: BookDetail) {
+        if let rec = localBookRecords[book.bookId], rec.format == .pdf {
+            let savedPage = lastReadPDFPageByBook[rec.id] ?? 0
+            let clamped = rec.pageCount > 0 ? min(max(0, savedPage), rec.pageCount - 1) : max(0, savedPage)
+            let targetChapter = ChapterItem(
+                id: "\(rec.id)_pdf_page_\(clamped)",
+                sourceId: LocalLibraryPlugin.sourceId,
+                title: rec.title,
+                url: LocalPDFParser.makeLocalPDFURL(bookId: rec.id, pageIndex: clamped),
+                volumeIndex: 1,
+                chapterIndex: 1,
+                isIllustrationChapter: false
+            )
+            openChapterInReader(targetChapter, startAtLastPage: false)
+            return
+        }
+
+        let allChapters = book.volumes.flatMap(\.chapters)
+        if let lastChapId = lastReadChapterByBook[book.scopedId],
+           let found = allChapters.first(where: { $0.id == lastChapId }) {
+            openChapterInReader(found, startAtLastPage: false)
+        } else if let first = allChapters.first {
+            openChapterInReader(first, startAtLastPage: false)
+        }
+    }
+
+    public func updatePDFReadPage(bookId: String, pageIndex: Int) {
+        let clamped = max(0, pageIndex)
+        guard lastReadPDFPageByBook[bookId] != clamped else { return }
+        lastReadPDFPageByBook[bookId] = clamped
+        savePersistedState()
+    }
+
+    public func relinkLocalBook(bookId: String) {
+        guard let existing = localBookRecords[bookId] else { return }
+        let panel = NSOpenPanel()
+        panel.title = "重新定位《\(existing.title)》"
+        panel.message = "请选择移动后的原 \(existing.format.displayBadge) 文件以恢复引用（阅读进度会完整保留）。"
+        panel.prompt = "恢复关联"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = (existing.format == .epub)
+        panel.allowsMultipleSelection = false
+        if existing.format == .pdf {
+            panel.allowedContentTypes = [.pdf]
+        } else if let epubType = UTType(filenameExtension: "epub") {
+            panel.allowedContentTypes = [epubType, .folder]
+        }
+
+        guard panel.runModal() == .OK, let newURL = panel.url else { return }
+
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let updated = try await self.localLibraryPlugin.store.relinkBook(id: bookId, newURL: newURL)
+                self.localBookRecords[bookId] = updated
+                self.bookDetailCache.removeValue(forKey: ScopedBookID(sourceId: LocalLibraryPlugin.sourceId, bookId: bookId).rawKey)
+                if let idx = self.bookmarks.firstIndex(where: { $0.id == bookId && $0.sourceId == LocalLibraryPlugin.sourceId }) {
+                    self.bookmarks[idx] = updated.toBookmarkEntry()
+                    self.savePersistedState()
+                }
+                self.missingLocalBookId = nil
+                self.missingLocalBookPath = nil
+                self.missingLocalBookNeedsICloud = false
+                self.errorBanner = nil
+                self.statusBanner = "已重新关联文件：《\(updated.title)》"
+                self.loadBook(inputOverride: bookId, sourceIdOverride: LocalLibraryPlugin.sourceId, recordNavigation: false)
+            } catch {
+                self.errorBanner = error.localizedDescription
+            }
+        }
+    }
+
+    public func downloadICloudLocalBookAndReload(bookId: String) {
+        guard let rec = localBookRecords[bookId] else { return }
+        isImportingLocalBooks = true
+        localImportProgressText = "正在从 iCloud 下载《\(rec.title)》…"
+        errorBanner = nil
+
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await AppleBooksBridge.ensureICloudItemDownloaded(at: rec.fileURL)
+                self.missingLocalBookId = nil
+                self.missingLocalBookPath = nil
+                self.missingLocalBookNeedsICloud = false
+                self.isImportingLocalBooks = false
+                self.localImportProgressText = nil
+                self.statusBanner = "《\(rec.title)》已从 iCloud 下载完成"
+                self.loadBook(inputOverride: bookId, sourceIdOverride: LocalLibraryPlugin.sourceId, recordNavigation: false)
+            } catch {
+                self.isImportingLocalBooks = false
+                self.localImportProgressText = nil
+                self.errorBanner = error.localizedDescription
+            }
+        }
     }
 }
 

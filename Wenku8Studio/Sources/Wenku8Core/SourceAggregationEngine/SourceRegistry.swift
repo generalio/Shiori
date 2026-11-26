@@ -15,13 +15,25 @@ public final class SourceRegistry: @unchecked Sendable {
     public static func makeDefaultRegistry(
         wenku8Client: Wenku8Client = Wenku8Client(),
         bilinovelPlugin: BilinovelPlugin = BilinovelPlugin(),
-        copymangaPlugin: CopymangaPlugin = CopymangaPlugin()
+        copymangaPlugin: CopymangaPlugin = CopymangaPlugin(),
+        localLibraryPlugin: LocalLibraryPlugin? = nil
     ) -> SourceRegistry {
         let registry = SourceRegistry()
         registry.register(wenku8Client, enabled: true)
         registry.register(bilinovelPlugin, enabled: true)
         registry.register(copymangaPlugin, enabled: true)
+        if let localLibraryPlugin {
+            registry.register(localLibraryPlugin, enabled: true)
+        }
         return registry
+    }
+
+    public func allOnlinePlugins() -> [any BookSourcePlugin] {
+        allPlugins().filter { !$0.descriptor.isLocalSource }
+    }
+
+    public func enabledOnlinePlugins(matching contentKind: ContentKind? = nil) -> [any BookSourcePlugin] {
+        enabledPlugins(matching: contentKind).filter { !$0.descriptor.isLocalSource }
     }
 
     public func register(_ plugin: any BookSourcePlugin, enabled: Bool = true) {
